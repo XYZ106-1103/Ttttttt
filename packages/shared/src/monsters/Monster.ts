@@ -49,6 +49,27 @@ export interface Monster extends Combatant {
   readonly seed: number;
   /** Current contact damage multiplier (brains raise it while charging). */
   contact: number;
+  /** Character that claimed this monster (first hit) — kill credit and loot priority. */
+  ownerId: number | null;
+  ownerUntil: number;
+  /** Character the brain is currently after. */
+  targetId: number | null;
+}
+
+/** How long a claim lasts without being refreshed by the owner's hits (s). */
+export const CLAIM_TIME = 10;
+
+/** Claim a monster for a character if it is free (or the claim expired). */
+export function claimMonster(m: Monster, characterId: number, now: number): void {
+  if (m.ownerId === null || m.ownerId === characterId || now > m.ownerUntil) {
+    m.ownerId = characterId;
+    m.ownerUntil = now + CLAIM_TIME;
+  }
+}
+
+/** True if another character holds a live claim on this monster. */
+export function claimedByOther(m: Monster, characterId: number, now: number): boolean {
+  return m.ownerId !== null && m.ownerId !== characterId && now <= m.ownerUntil;
 }
 
 export function monsterMovement(def: MonsterDef): MovementConfig {
@@ -124,6 +145,9 @@ export function createMonster(
     damageBy: new Map(),
     seed,
     contact: def.contact,
+    ownerId: null,
+    ownerUntil: 0,
+    targetId: null,
   };
 }
 

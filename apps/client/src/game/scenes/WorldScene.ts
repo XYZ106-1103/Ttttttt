@@ -1,6 +1,8 @@
 import Phaser from 'phaser';
 import {
+  type Adventurer,
   CHUNK_PIXELS,
+  toneOf,
   HAND_SPEED,
   HOTBAR_SIZE,
   itemRegistry,
@@ -24,6 +26,8 @@ import { ParticleFx } from '../fx/ParticleFx';
 import { InteractionController } from '../interaction/InteractionController';
 import { CombatPresenter } from '../combat/CombatPresenter';
 import { SKILL_ACTIONS } from '../../input/keybindings';
+import type { AdventurerDetail, AdventurerSummary } from '../../app/stores';
+import { openWindow } from '../../ui/windowActions';
 import { SaveManager } from '../persistence/SaveManager';
 import { EMPTY_SAVE } from '../persistence/SaveStore';
 import { ChunkRenderer, type ViewRect } from '../render/ChunkRenderer';
@@ -94,6 +98,7 @@ export class WorldScene extends Phaser.Scene {
   private publishedPlayerVersion = -1;
   private publishedEquipVersion = -1;
   private playerPublishTimer = 0;
+  private advTimer = 0;
 
   private zoom = 2;
   private viewW = 960;
@@ -207,6 +212,9 @@ export class WorldScene extends Phaser.Scene {
 
     this.onResize();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.onResize, this);
+    // Right-click inspects adventurers (the browser menu would get in the way).
+    this.input.mouse?.disableContextMenu();
+    this.input.on('pointerdown', this.onInspect, this);
     this.unsubscribers.push(stores.settings.subscribe(() => this.onResize()));
     this.cameraCtl.snap(this.titleTarget(0), this.viewW, this.viewH, this.bounds());
 
@@ -276,6 +284,87 @@ export class WorldScene extends Phaser.Scene {
     });
     if (data?.autoStart) void this.startGame();
     else this.fadeTo(0, 900);
+  }
+
+  private readonly onInspect = (p: Phaser.Input.Pointer): void => {
+    if (p.button !== 2 || this.mode !== 'playing') return;
+    const wx = this.view.left + p.x / this.zoom;
+    const wy = this.view.top + p.y / this.zoom;
+    const a = this.combatView.adventurers.pick(this.sim.adventurers.active, wx, wy);
+    if (!a) return;
+    this.services.stores.adventurers.set({ selected: a.key });
+    openWindow(this.services.stores, 'adventurer');
+    this.publishAdventurers(true);
+  };
+
+  /** Roster and the inspected adventurer's card (2 Hz). */
+  private publishAdventurers(force = false): void {
+    const { stores } = this.services;
+    const ui = stores.ui.get();
+    const visible = ui.windows.includes('adventurer') || ui.windows.includes('roster');
+    this.advTimer -= 1 / 60;
+    if (!force && (!visible || this.advTimer > 0)) return;
+    this.advTimer = 0.5;
+    const now = this.sim.time;
+    const spawnX = this.sim.world.generator.spawnTileX;
+    const summary = (a: Adventurer): AdventurerSummary => {
+      const c = a.character;
+      return {
+        key: a.key,
+        name: a.profile.name.ko,
+        level: c.level,
+        jobId: c.jobId,
+        archetype: a.profile.archetype,
+        active: a.tier === 'active',
+        doing: !c.alive ? 'dead' : a.tier === 'active' ? a.action : `abstract_${a.activity}`,
+        hp: Math.ceil(c.hp),
+        maxHp: c.stats.maxHp,
+        alive: c.alive,
+        x: Math.floor(c.motor.x / TILE_SIZE) - spawnX,
+        affinity: a.memory.relations.get('player')?.affinity ?? 0,
+      };
+    };
+    const list = this.sim.adventurers.all.map(summary);
+    const key = stores.adventurers.get().selected;
+    const a = key ? this.sim.adventurers.byKey(key) : undefined;
+    let detail: AdventurerDetail | null = null;
+    if (a) {
+      const g = a.goal;
+      const rel = a.memory.relations.get('player');
+      detail = {
+        ...summary(a),
+        personality: a.profile.personality,
+        tone: toneOf(a.profile.personality),
+        skill: a.profile.skill,
+        preferredJob: a.profile.preferredJob,
+        nightOwl: a.profile.nightOwl,
+        goal: g
+          ? {
+              kind: g.kind,
+              params:
+                g.kind === 'level'
+                  ? { level: g.target }
+                  : g.kind === 'item'
+                    ? { item: g.itemId, count: g.count }
+                    : g.kind === 'slay'
+                      ? { monster: g.monsterId, n: g.progress, count: g.count }
+                      : { x: Math.round(g.targetX - spawnX) },
+            }
+          : null,
+        memories: a.memory
+          .recall(now, 6)
+          .map((m) => ({ kind: m.kind, detail: m.detail, ago: now - m.t })),
+        scores: Object.entries(a.scores)
+          .map(([k, v]) => [k, Math.round((v ?? 0) * 100) / 100] as const)
+          .sort((x, y) => y[1] - x[1]),
+        met: rel?.met ?? 0,
+        helped: rel?.helped ?? 0,
+        weapon: a.character.heldWeapon()
+          ? (a.character.inventory.get(a.character.selectedSlot)?.itemId ?? null)
+          : null,
+      };
+    }
+    stores.adventurers.set({ list, detail });
   }
 
   private bounds(): { width: number; height: number } {
@@ -548,7 +637,7 @@ export class WorldScene extends Phaser.Scene {
     this.objects.update(view, this.elapsed);
     this.torches.update(this.elapsed);
     this.drops.update(this.sim.drops, this.elapsed);
-    if (playing) this.combatView.update(dt, a);
+    if (playing) this.combatView.update(dt, a, this.zoom);
     const sky = this.parallax.update(view, this.sim.clock.timeOfDay, dt, this.elapsed);
     const lights: PointLight[] = [];
     const fires: { x: number; y: number }[] = [];
@@ -571,6 +660,7 @@ export class WorldScene extends Phaser.Scene {
       this.saves.update(dt);
       this.trackExplored(dt, view);
       this.combatView.publish(dt);
+      this.publishAdventurers();
     }
     this.evictFarChunks(dt, view);
     this.publish(dt);
@@ -837,7 +927,20 @@ export class WorldScene extends Phaser.Scene {
       alive: this.sim.player.alive,
       monsters: this.sim.monsters.monsters.filter((x) => x.alive).length,
       monsterSprites: this.combatView.monsters.count,
+      adventurersActive: this.sim.adventurers.active.length,
+      adventurerSprites: this.combatView.adventurers.count,
     };
+  }
+
+  /** Test hook: active adventurers (key, position) for inspection tests. */
+  debugAdventurers(): { key: string; x: number; y: number; action: string; level: number }[] {
+    return this.sim.adventurers.active.map((a) => ({
+      key: a.key,
+      x: a.character.motor.x,
+      y: a.character.motor.y,
+      action: a.action,
+      level: a.character.level,
+    }));
   }
 
   /** Test hook: spawn a monster near the player. */
@@ -879,6 +982,7 @@ export class WorldScene extends Phaser.Scene {
     for (const u of this.unsubscribers) u();
     this.unsubscribers.length = 0;
     this.services.bridge.detach();
+    this.input.off('pointerdown', this.onInspect, this);
     this.interaction.destroy();
     this.chunks.destroy();
     this.objects.destroy();

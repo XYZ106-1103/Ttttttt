@@ -46,6 +46,9 @@ function useHotkeys(): void {
           case 'skills':
             if (playing) toggleWindow(stores, 'skills');
             break;
+          case 'roster':
+            if (playing) toggleWindow(stores, 'roster');
+            break;
           case 'keyGuide':
             toggleWindow(stores, 'keyGuide');
             break;

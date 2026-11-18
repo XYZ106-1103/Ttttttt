@@ -25,6 +25,8 @@ export function KeyGuideWindow(props: {
     { label: t('keys.dodge'), keys: keys('dodge').slice(0, 1) },
     { label: t('keys.quickHeal'), keys: [...keys('quickHeal'), ...keys('quickMana')] },
     { label: t('keys.skillWindow'), keys: keys('skills') },
+    { label: t('keys.roster'), keys: keys('roster') },
+    { label: t('keys.inspect'), keys: ['RMB'] },
     { label: t('keys.hotbar'), keys: ['1-0', 'Wheel'] },
     { label: t('keys.inventory'), keys: keys('inventory') },
     { label: t('keys.worldMap'), keys: keys('worldMap') },

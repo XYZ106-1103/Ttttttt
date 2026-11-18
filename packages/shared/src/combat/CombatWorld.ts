@@ -29,7 +29,7 @@ export interface CombatBody {
 export interface Combatant {
   readonly id: number;
   readonly team: Team;
-  readonly kind: 'player' | 'monster';
+  readonly kind: 'player' | 'adventurer' | 'monster';
   readonly body: CombatBody;
   hp: number;
   mp: number;

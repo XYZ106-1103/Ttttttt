@@ -1747,3 +1747,166 @@ body {
     gap: 4px;
   }
 }
+
+/* =============================================================================================
+   PHASE 4 — AI adventurers
+   ============================================================================================= */
+.pw-advcard {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pw-advcard__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.pw-advcard__name {
+  font-size: 16px;
+  color: var(--gold-hi);
+}
+.pw-advcard__tag {
+  margin-left: 4px;
+  padding: 0 4px;
+  font-family: var(--font-small);
+  font-size: 9px;
+  color: #8fd4ff;
+  border: 1px solid #3a6a8c;
+  vertical-align: middle;
+}
+.pw-advcard__sub {
+  font-size: 11px;
+}
+.pw-advcard__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.pw-advcard__row > span:first-child {
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.pw-advcard__row b {
+  font-weight: 400;
+  text-align: right;
+}
+.pw-advcard__label {
+  margin-top: 6px;
+  color: var(--gold);
+  font-weight: 700;
+}
+.pw-traits,
+.pw-scores {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 12px;
+  padding: 6px;
+  background: rgba(7, 8, 15, 0.45);
+  border: 1px solid var(--line);
+}
+.pw-scores {
+  grid-template-columns: 1fr;
+}
+.pw-trait,
+.pw-score {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.pw-trait > span:first-child,
+.pw-score > span:first-child {
+  width: 58px;
+  color: var(--text-dim);
+}
+.pw-score small {
+  width: 32px;
+  text-align: right;
+  color: var(--text-faint);
+}
+.pw-trait__bar,
+.pw-affinity {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  background: #0b0d18;
+  border: 1px solid #000;
+}
+.pw-trait__bar i,
+.pw-affinity i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, var(--gold-dim), var(--gold));
+}
+.pw-affinity {
+  max-width: 120px;
+}
+.pw-affinity i {
+  background: linear-gradient(90deg, #c94a6a, #e8c46a 50%, #7fd67a);
+}
+.pw-memories {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: rgba(7, 8, 15, 0.45);
+  border: 1px solid var(--line);
+}
+.pw-memories li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+.pw-memories small {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.pw-roster__count {
+  margin-left: auto;
+  align-self: center;
+  color: var(--text-dim);
+}
+.pw-roster__list {
+  margin-top: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pw-roster__row {
+  display: grid;
+  grid-template-columns: 70px 44px 60px 1fr 100px;
+  gap: 8px;
+  padding: 4px 6px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: rgba(7, 8, 15, 0.45);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.pw-roster__row:hover {
+  border-color: var(--line-hi);
+}
+.pw-roster__row.is-near .pw-roster__where {
+  color: #7fd67a;
+}
+.pw-roster__row.is-dead {
+  opacity: 0.5;
+}
+.pw-roster__name {
+  color: var(--gold-hi);
+}
+.pw-roster__doing,
+.pw-roster__where {
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

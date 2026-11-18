@@ -1,7 +1,14 @@
 import {
+  type ActionIntent,
   type ActorEvent,
-  applyItemUse,
+  type Adventurer,
+  AdventurerDirector,
+  type BrainEvent,
+  bestPotion,
   type CastFail,
+  type CharacterEnv,
+  type CharacterStepOut,
+  claimMonster,
   type CombatEvent,
   CombatWorld,
   craft,
@@ -10,14 +17,17 @@ import {
   DEFAULT_OVERWORLD,
   deriveSeed,
   type Drop,
+  type DropEntity,
+  DropSystem,
+  drinkPotion,
   type EquipFail,
   type EquipSlotId,
   expForKill,
   expToNextLevel,
   getMonsterDef,
-  getSkillDef,
-  HOTBAR_SIZE,
-  type InteractionActor,
+  heldMode,
+  type HeldMode,
+  IDLE_ACTION,
   type InteractionContext,
   isRegionSolid,
   itemRegistry,
@@ -28,17 +38,18 @@ import {
   MonsterManager,
   type MotorInput,
   type MovementConfig,
+  newStepOut,
   OverworldGenerator,
   previewUse,
+  regenCharacter,
   rollLoot,
   Rng,
   type StatKey,
-  stepMotor,
-  sweepX,
-  sweepY,
+  stepCharacter,
   TILE_SIZE,
   type UseAction,
   type UseFailReason,
+  type UseIntent,
   type UseOutcome,
   World,
   WorldClock,
@@ -47,22 +58,8 @@ import type { PlayerSave, SaveBundle, WorldMeta } from '../persistence/SaveStore
 import { SAVE_VERSION } from '../persistence/SaveStore';
 import { Player, SKILL_BAR_SIZE } from './Player';
 
-export { SKILL_BAR_SIZE, Player };
-
-/** An item lying in the world, waiting to be picked up. */
-export interface DropEntity {
-  readonly id: number;
-  readonly itemId: string;
-  count: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  age: number;
-  /** Seconds before the drop can be picked up (so it visibly pops out first). */
-  pickupDelay: number;
-  magnet: boolean;
-}
+export { SKILL_BAR_SIZE, Player, IDLE_ACTION };
+export type { ActionIntent, DropEntity, UseIntent };
 
 export interface PickupEvent {
   readonly itemId: string;
@@ -93,36 +90,12 @@ export interface SimEvents {
   levelUps: number[];
   exp: { amount: number; x: number; y: number }[];
   notices: SimNotice[];
+  /** Adventurer actions/uses/level-ups for the renderer. */
+  aiActor: { id: number; event: ActorEvent }[];
+  aiUses: { id: number; out: UseOutcome }[];
+  aiLevelUps: { id: number; level: number }[];
+  ai: BrainEvent[];
 }
-
-export interface UseIntent {
-  readonly tx: number;
-  readonly ty: number;
-}
-
-/** Combat input for one tick (mouse + keyboard). */
-export interface ActionIntent {
-  readonly attackPressed: boolean;
-  readonly attackHeld: boolean;
-  readonly aimX: number;
-  readonly aimY: number;
-  /** Skill bar slot pressed this tick (0..3). */
-  readonly skillSlot: number | null;
-  readonly dodge: boolean;
-  readonly quickHeal: boolean;
-  readonly quickMana: boolean;
-}
-
-export const IDLE_ACTION: ActionIntent = {
-  attackPressed: false,
-  attackHeld: false,
-  aimX: 0,
-  aimY: 0,
-  skillSlot: null,
-  dodge: false,
-  quickHeal: false,
-  quickMana: false,
-};
 
 export interface SimulationOptions {
   seed: number;
@@ -133,16 +106,12 @@ export interface SimulationOptions {
   save?: SaveBundle;
   /** Natural monster spawning (default true). */
   monsters?: boolean;
+  /** Number of AI adventurers (default 30, 0 disables them). */
+  adventurers?: number;
+  /** Simulate a few minutes of adventurer life before a new world starts (default true). */
+  warmUp?: boolean;
 }
 
-const DROP_SIZE = 10;
-const DROP_GRAVITY = 900;
-/** Drops fly to the player from about as far as tools can reach. */
-const MAGNET_RANGE = 5.5 * TILE_SIZE;
-const PICKUP_RANGE = 14;
-const DROP_LIFETIME = 300;
-/** Seconds without taking damage before out-of-combat regeneration kicks in. */
-const OUT_OF_COMBAT = 5;
 export const RESPAWN_DELAY = 5;
 /** Fraction of the current level's requirement lost on death. */
 export const DEATH_EXP_PENALTY = 0.05;
@@ -150,7 +119,7 @@ export const DEATH_EXP_PENALTY = 0.05;
 export const SAFE_RADIUS = 34;
 
 /**
- * The local simulation: world, clock, the player's character, monsters, combat and loose item
+ * The local simulation: world, clock, the player, AI adventurers, monsters, combat and loose item
  * drops. Contains no rendering code; PHASE 6 moves the authoritative copy to the server and this
  * becomes the client-side predictor.
  */
@@ -162,7 +131,8 @@ export class GameSimulation {
   readonly worldId: string;
   readonly combat: CombatWorld;
   readonly monsters: MonsterManager;
-  readonly drops: DropEntity[] = [];
+  readonly adventurers: AdventurerDirector;
+  readonly dropSystem: DropSystem;
   readonly explored = new Set<number>();
   readonly events: SimEvents = {
     uses: [],
@@ -174,15 +144,19 @@ export class GameSimulation {
     levelUps: [],
     exp: [],
     notices: [],
+    aiActor: [],
+    aiUses: [],
+    aiLevelUps: [],
+    ai: [],
   };
   /** Simulation time in seconds. */
   time = 0;
   tickCount = 0;
   playTime = 0;
   monstersEnabled: boolean;
-  private nextDropId = 1;
   private readonly ctx: InteractionContext;
   private readonly lootRng: Rng;
+  private readonly charEnv: { -readonly [K in keyof CharacterEnv]: CharacterEnv[K] };
 
   constructor(options: SimulationOptions) {
     this.worldId = options.worldId;
@@ -203,10 +177,19 @@ export class GameSimulation {
       deriveSeed(options.seed, 'monsters'),
     );
     this.lootRng = new Rng(deriveSeed(options.seed, 'loot'));
+    this.dropSystem = new DropSystem(deriveSeed(options.seed, 'drops'));
     this.monstersEnabled = options.monsters ?? true;
+    this.charEnv = {
+      world: this.world,
+      combat: this.combat,
+      movement: this.movement,
+      interaction: this.ctx,
+      now: 0,
+      dt: 0,
+    };
 
     const spawn = this.world.spawnPoint();
-    // Ids come from the combat world so players and monsters never collide.
+    // Ids come from the combat world so players, adventurers and monsters never collide.
     this.player = new Player(
       this.combat.newId(),
       options.playerName,
@@ -216,8 +199,29 @@ export class GameSimulation {
     );
     this.player.motor.grounded = true;
     this.combat.add(this.player);
+    const sx = this.world.generator.spawnTileX;
+    this.adventurers = new AdventurerDirector(this.world, this.combat, this.movement, {
+      count: options.adventurers ?? 30,
+      seed: options.seed,
+      homeCenter: sx,
+      safeFrom: sx - SAFE_RADIUS,
+      safeTo: sx + SAFE_RADIUS,
+    });
     if (save?.player) this.applyPlayerSave(save.player);
     else this.player.giveStartingItems();
+    this.adventurers.load(save?.adventurers);
+    if (save?.meta && save.adventurers) {
+      // The world kept living while the game was closed.
+      const away = (Date.now() - save.meta.savedAt) / 1000;
+      if (away > 30) this.adventurers.catchUp(away, 0);
+    } else if (options.warmUp ?? true) {
+      // A new world: adventurers have already been out for a while when the player arrives.
+      this.adventurers.catchUp(8 * 60, 0);
+    }
+  }
+
+  get drops(): readonly DropEntity[] {
+    return this.dropSystem.drops;
   }
 
   private applyPlayerSave(p: PlayerSave): void {
@@ -235,12 +239,13 @@ export class GameSimulation {
   }
 
   /** What the attack button does with the selected item. */
-  heldMode(): 'weapon' | 'consumable' | 'sandbox' {
-    const st = this.player.inventory.get(this.player.selectedSlot);
-    const def = st ? itemRegistry.get(st.itemId) : undefined;
-    if (def?.weapon) return 'weapon';
-    if (def?.consumable) return 'consumable';
-    return 'sandbox';
+  heldMode(): HeldMode {
+    return heldMode(this.player);
+  }
+
+  private get safe(): { safeFrom: number; safeTo: number } {
+    const sx = this.world.generator.spawnTileX;
+    return { safeFrom: sx - SAFE_RADIUS, safeTo: sx + SAFE_RADIUS };
   }
 
   /** Advance one fixed step with the player's movement, item-use and combat intents. */
@@ -252,124 +257,84 @@ export class GameSimulation {
   ): void {
     const p = this.player;
     const now = this.time;
-    p.prevX = p.motor.x;
-    p.prevY = p.motor.y;
+    const night = this.clock.daylight < 0.35;
+    this.charEnv.now = now;
+    this.charEnv.dt = dt;
     p.refreshStats(now);
 
-    if (p.alive) this.tickPlayer(dt, input, use, action);
+    // Player.
+    const out = newStepOut();
+    stepCharacter(this.charEnv, p, { move: input, use, action }, out);
+    this.handlePlayerOut(out);
 
+    // Adventurers (the same step function, driven by their brains).
+    const pm = p.motor;
+    this.adventurers.updateTiers(pm.x, pm.y, now);
+    const steps = this.adventurers.stepActive(
+      {
+        interaction: this.ctx,
+        monsters: this.monsters.monsters,
+        drops: this.dropSystem.drops,
+        player: p,
+        now,
+        dt,
+        night,
+      },
+      this.charEnv,
+      this.safe,
+    );
+    for (const s of steps) this.handleAdventurerOut(s.adventurer, s.out);
+    this.adventurers.stepAbstract(dt, now, night);
+
+    const active = this.adventurers.active.map((a) => a.character).filter((c) => c.alive);
     this.combat.step(dt, now);
-    this.monsters.step(dt, now, [p], {
-      safeFrom: this.world.generator.spawnTileX - SAFE_RADIUS,
-      safeTo: this.world.generator.spawnTileX + SAFE_RADIUS,
-      night: this.clock.daylight < 0.35,
+    this.monsters.step(dt, now, [p, ...active], {
+      ...this.safe,
+      night,
       enabled: this.monstersEnabled,
+      anchors: active,
+      maxMonsters: 26,
     });
     this.processCombatEvents();
-    if (p.alive) this.regen(dt);
-    this.stepDrops(dt);
+    regenCharacter(p, now, dt);
+    this.adventurers.regenActive(now, dt);
+    for (const pk of this.dropSystem.step(dt, now, this.world, [p, ...active])) {
+      if (pk.characterId === p.id) this.events.pickups.push({ itemId: pk.itemId, count: pk.count });
+    }
+    for (const e of this.adventurers.events) this.events.ai.push(e);
+    this.adventurers.events.length = 0;
     this.clock.advance(dt);
     this.time += dt;
     this.playTime += dt;
     this.tickCount++;
   }
 
-  private tickPlayer(
-    dt: number,
-    input: MotorInput,
-    use: UseIntent | null,
-    action: ActionIntent,
-  ): void {
-    const p = this.player;
-    const now = this.time;
-
-    // Skill keys auto-swap to a matching weapon from the hotbar.
-    let skill: string | null = null;
-    if (action.skillSlot !== null) {
-      skill = p.skillBar[action.skillSlot] ?? null;
-      const def = skill ? getSkillDef(skill) : undefined;
-      if (def?.weapon && p.usableWeapon()?.type !== def.weapon) {
-        const slot = p.findHotbarWeapon(def.weapon);
-        if (slot >= 0) {
-          this.selectSlot(slot);
-          p.refreshStats(now);
-        }
-      }
+  private handlePlayerOut(out: CharacterStepOut): void {
+    for (const u of out.uses) {
+      this.events.uses.push(u);
+      this.dropSystem.spawn(u.drops, this.time, this.player.id);
     }
-    if (action.quickHeal) this.quickUse('heal');
-    if (action.quickMana) this.quickUse('mana');
-
-    const mode = this.heldMode();
-    const weapon = p.usableWeapon();
-    if (mode === 'weapon' && !weapon && action.attackPressed) {
-      this.events.notices.push({ kind: 'weaponLevel', level: p.heldWeapon()?.reqLevel ?? 1 });
-    }
-    if (mode === 'consumable' && action.attackPressed) this.consume(p.selectedSlot);
-
-    const override = p.combat.update(
-      {
-        self: p,
-        combat: this.combat,
-        grid: this.world,
-        weapon,
-        canAttack: mode === 'weapon' && weapon !== null,
-        skillLevel: (id) => p.skillLevel(id),
-        now,
-        dt,
-      },
-      {
-        attackPressed: action.attackPressed,
-        attackHeld: action.attackHeld,
-        aimX: action.aimX,
-        aimY: action.aimY,
-        skill,
-        dodge: action.dodge,
-        moveX: input.moveX,
-      },
-    );
-    for (const e of p.combat.events) {
-      this.events.actor.push(e);
-      if (e.type === 'castFail')
-        this.events.notices.push({ kind: 'castFail', skill: e.skill, reason: e.reason });
-    }
-    p.combat.events.length = 0;
-
-    const staggered = now < p.staggerUntil;
-    const m = p.motor;
-    if (override.vx !== null) m.vx = override.vx;
-    if (override.vy !== null) m.vy = override.vy;
-    const dashing = override.vx !== null;
-    const moveX = dashing
-      ? Math.sign(override.vx ?? 0)
-      : staggered
-        ? 0
-        : input.moveX * override.moveMul;
-    stepMotor(
-      m,
-      {
-        moveX,
-        jumpHeld: input.jumpHeld && !override.noJump,
-        jumpPressed: input.jumpPressed && !override.noJump && !staggered,
-        down: input.down,
-        speedMul: dashing ? Math.abs(override.vx ?? 0) / this.movement.runSpeed : p.stats.moveSpeed,
-        jumpMul: p.stats.jump,
-        gravityMul: override.gravityMul,
-      },
-      this.world,
-      this.movement,
-      dt,
-    );
-    if (override.facing) m.facing = override.facing;
-    p.facing = m.facing;
-    if (use && mode === 'sandbox') this.use(use.tx, use.ty);
-    if (m.y > this.world.heightPixels + 64) this.combat.kill(p, -1);
+    if (out.failed) this.events.failed = out.failed;
+    for (const e of out.actor) this.events.actor.push(e);
+    for (const f of out.castFails)
+      this.events.notices.push({ kind: 'castFail', skill: f.skill, reason: f.reason });
+    if (out.weaponLevel !== null)
+      this.events.notices.push({ kind: 'weaponLevel', level: out.weaponLevel });
+    if (out.consume !== null) this.consume(out.consume);
+    if (out.quick) this.quickUse(out.quick);
   }
 
-  private regen(dt: number): void {
-    const p = this.player;
-    const calm = this.time - p.lastHitAt > OUT_OF_COMBAT;
-    p.hp = Math.min(p.stats.maxHp, p.hp + p.stats.hpRegen * (calm ? 4 : 0.5) * dt);
-    p.mp = Math.min(p.stats.maxMp, p.mp + p.stats.mpRegen * (calm ? 2 : 1) * dt);
+  private handleAdventurerOut(a: Adventurer, out: CharacterStepOut): void {
+    const c = a.character;
+    for (const u of out.uses) {
+      this.events.aiUses.push({ id: c.id, out: u });
+      this.dropSystem.spawn(u.drops, this.time, c.id, 0.2);
+    }
+    for (const e of out.actor) this.events.aiActor.push({ id: c.id, event: e });
+    if (out.quick) {
+      const slot = bestPotion(c, out.quick);
+      if (slot >= 0) drinkPotion(c, slot, this.combat, this.time);
+    }
   }
 
   private monsterById(id: number): Monster | undefined {
@@ -378,13 +343,31 @@ export class GameSimulation {
 
   private processCombatEvents(): void {
     const p = this.player;
+    const now = this.time;
     for (const e of this.combat.events) {
       this.events.combat.push(e);
-      if (e.type === 'damage' && e.attackerId === p.id) {
+      if (e.type === 'damage') {
         const m = this.monsterById(e.targetId);
-        if (m) m.damageBy.set(p.id, (m.damageBy.get(p.id) ?? 0) + e.amount);
+        if (m && e.attackerId > 0 && e.source !== 'dot') {
+          claimMonster(m, e.attackerId, now);
+          m.damageBy.set(e.attackerId, (m.damageBy.get(e.attackerId) ?? 0) + e.amount);
+          // The player stepping in for an adventurer under attack is remembered.
+          if (e.attackerId === p.id && m.targetId !== null && m.targetId !== p.id) {
+            const a = this.adventurers.byCharacter(m.targetId);
+            if (a) this.adventurers.noteHelp(a, now);
+          }
+        }
       }
-      if (e.type === 'death' && e.targetId === p.id) this.onPlayerDeath();
+      if (e.type === 'death') {
+        if (e.targetId === p.id) this.onPlayerDeath();
+        else {
+          const a = this.adventurers.byCharacter(e.targetId);
+          if (a) {
+            const killer = this.monsterById(e.killerId);
+            this.adventurers.onDeath(a, now, killer?.def.id ?? null);
+          }
+        }
+      }
     }
     this.combat.events.length = 0;
     for (const e of this.monsters.events) this.events.monster.push(e);
@@ -393,11 +376,26 @@ export class GameSimulation {
     this.monsters.deaths.length = 0;
   }
 
+  /** Who gets credit for a kill: the live claim holder, else whoever dealt the most damage. */
+  private creditFor(m: Monster): number | null {
+    if (m.ownerId !== null && m.damageBy.has(m.ownerId)) return m.ownerId;
+    let best: number | null = null;
+    let bd = 0;
+    for (const [id, d] of m.damageBy) {
+      if (d > bd) {
+        bd = d;
+        best = id;
+      }
+    }
+    return best;
+  }
+
   private onMonsterDeath(m: Monster): void {
     const p = this.player;
     const x = m.motor.x;
     const y = m.motor.y - m.motor.height / 2;
-    if (m.damageBy.has(p.id)) {
+    const credit = this.creditFor(m);
+    if (credit === p.id) {
       const amount = expForKill(m.def.exp, p.level, m.def.level);
       this.events.exp.push({ amount, x, y: m.motor.y - m.motor.height });
       const gained = p.gainExp(amount);
@@ -407,8 +405,18 @@ export class GameSimulation {
         p.mp = p.stats.maxMp;
         this.events.levelUps.push(p.level);
       }
+    } else if (credit !== null) {
+      const a = this.adventurers.byCharacter(credit);
+      if (a && this.adventurers.onKill(a, m.def, this.time) > 0)
+        this.events.aiLevelUps.push({ id: credit, level: a.character.level });
+    }
+    if (credit !== null) {
       const loot = rollLoot(m.def.drops, this.lootRng);
-      this.spawnDrops(loot.map((l) => ({ itemId: l.itemId, count: l.count, x, y })));
+      this.dropSystem.spawn(
+        loot.map((l) => ({ itemId: l.itemId, count: l.count, x, y })),
+        this.time,
+        credit,
+      );
     }
     if (m.def.boss) this.events.notices.push({ kind: 'bossDefeated', monsterId: m.def.id });
   }
@@ -431,24 +439,26 @@ export class GameSimulation {
     return true;
   }
 
-  private actor(): InteractionActor {
-    const p = this.player;
-    const m = p.motor;
-    return {
-      x: m.x,
-      y: m.y,
-      width: m.width,
-      height: m.height,
-      inventory: p.inventory,
-      progress: p.hit,
-      nextUseAt: p.nextUseAt,
-    };
-  }
-
   /** Cursor preview for the selected item at a tile. */
   preview(tx: number, ty: number): { action: UseAction; ok: boolean; reason?: UseFailReason } {
-    if (this.heldMode() !== 'sandbox' || !this.player.alive) return { action: 'none', ok: false };
-    return previewUse(this.ctx, this.actor(), this.player.selectedSlot, tx, ty);
+    const p = this.player;
+    if (this.heldMode() !== 'sandbox' || !p.alive) return { action: 'none', ok: false };
+    const m = p.motor;
+    return previewUse(
+      this.ctx,
+      {
+        x: m.x,
+        y: m.y,
+        width: m.width,
+        height: m.height,
+        inventory: p.inventory,
+        progress: p.hit,
+        nextUseAt: p.nextUseAt,
+      },
+      p.selectedSlot,
+      tx,
+      ty,
+    );
   }
 
   /** Mining progress (0..1) on a tile currently being hit, if any. */
@@ -457,24 +467,6 @@ export class GameSimulation {
     if (!h || h.key !== `t:${tx},${ty}` || this.time - h.lastHit > 3) return 0;
     const def = this.world.tiles.get(this.world.getFg(tx, ty));
     return def && def.durability > 0 ? Math.min(1, h.damage / def.durability) : 0;
-  }
-
-  private use(tx: number, ty: number): void {
-    const actor = this.actor();
-    const out = applyItemUse(this.ctx, actor, this.player.selectedSlot, tx, ty, this.time);
-    this.player.hit = actor.progress;
-    this.player.nextUseAt = actor.nextUseAt;
-    if (out.ok) {
-      this.events.uses.push(out);
-      this.spawnDrops(out.drops);
-    } else if (
-      out.reason &&
-      out.reason !== 'cooldown' &&
-      out.reason !== 'nothing' &&
-      out.reason !== 'out_of_reach'
-    ) {
-      this.events.failed = out.reason;
-    }
   }
 
   // --- Consumables --------------------------------------------------------------------------
@@ -486,10 +478,6 @@ export class GameSimulation {
     const def = st ? itemRegistry.get(st.itemId) : undefined;
     const c = def?.consumable;
     if (!st || !c || !p.alive) return false;
-    if (this.time < p.potionCooldownUntil && (c.heal || c.mana)) {
-      this.events.notices.push({ kind: 'consumeFail', reason: 'cooldown' });
-      return false;
-    }
     if (c.summon) {
       const m = p.motor;
       const tx = Math.floor(m.x / TILE_SIZE);
@@ -508,30 +496,21 @@ export class GameSimulation {
         return false;
       }
       this.monsters.spawn(c.summon, at.x, at.y);
+      p.inventory.removeAt(index, 1);
       this.events.notices.push({ kind: 'bossSpawned', monsterId: c.summon });
+      this.events.notices.push({ kind: 'consumed', itemId: st.itemId });
+      return true;
     }
-    if (c.heal) this.combat.heal(p, c.heal);
-    if (c.mana) this.combat.heal(p, c.mana, true);
-    if (c.heal || c.mana) p.potionCooldownUntil = this.time + c.cooldown;
-    p.inventory.removeAt(index, 1);
+    const r = drinkPotion(p, index, this.combat, this.time);
+    if (r === 'cooldown') this.events.notices.push({ kind: 'consumeFail', reason: 'cooldown' });
+    if (r !== 'ok') return false;
     this.events.notices.push({ kind: 'consumed', itemId: st.itemId });
     return true;
   }
 
   /** Quick-use the strongest potion of a kind from anywhere in the inventory (H / J keys). */
   quickUse(kind: 'heal' | 'mana'): boolean {
-    const inv = this.player.inventory;
-    let best = -1;
-    let bestValue = 0;
-    for (let i = 0; i < inv.size; i++) {
-      const st = inv.get(i);
-      const c = st ? itemRegistry.get(st.itemId)?.consumable : undefined;
-      const v = kind === 'heal' ? (c?.heal ?? 0) : (c?.mana ?? 0);
-      if (v > bestValue) {
-        best = i;
-        bestValue = v;
-      }
-    }
+    const best = bestPotion(this.player, kind);
     return best >= 0 ? this.consume(best) : false;
   }
 
@@ -563,81 +542,14 @@ export class GameSimulation {
 
   // --- Drops --------------------------------------------------------------------------------
 
-  spawnDrops(drops: readonly Drop[]): void {
-    for (const d of drops) {
-      this.drops.push({
-        id: this.nextDropId++,
-        itemId: d.itemId,
-        count: d.count,
-        x: d.x,
-        y: d.y,
-        vx: (Math.random() - 0.5) * 90,
-        vy: -110 - Math.random() * 60,
-        age: 0,
-        pickupDelay: 0.35,
-        magnet: false,
-      });
-    }
-  }
-
-  private stepDrops(dt: number): void {
-    const m = this.player.motor;
-    const px = m.x;
-    const py = m.y - m.height / 2;
-    const alive = this.player.alive;
-    for (let i = this.drops.length - 1; i >= 0; i--) {
-      const d = this.drops[i] as DropEntity;
-      d.age += dt;
-      d.pickupDelay = Math.max(0, d.pickupDelay - dt);
-      const dx = px - d.x;
-      const dy = py - (d.y - DROP_SIZE / 2);
-      const dist = Math.hypot(dx, dy);
-      const canTake =
-        alive && d.pickupDelay <= 0 && this.player.inventory.capacityFor(d.itemId) > 0;
-      if (canTake && dist < PICKUP_RANGE) {
-        const left = this.player.inventory.add(d.itemId, d.count);
-        const taken = d.count - left;
-        if (taken > 0) this.events.pickups.push({ itemId: d.itemId, count: taken });
-        if (left === 0) {
-          this.drops.splice(i, 1);
-          continue;
-        }
-        d.count = left;
-      }
-      if (canTake && dist < MAGNET_RANGE) d.magnet = true;
-      if (d.magnet && canTake) {
-        // Fly toward the player, ignoring terrain (classic sandbox magnet).
-        const speed = 260 + d.age * 40;
-        d.vx += ((dx / dist) * speed - d.vx) * Math.min(1, dt * 10);
-        d.vy += ((dy / dist) * speed - d.vy) * Math.min(1, dt * 10);
-        d.x += d.vx * dt;
-        d.y += d.vy * dt;
-      } else {
-        d.magnet = false;
-        d.vy = Math.min(d.vy + DROP_GRAVITY * dt, 420);
-        const body = { x: d.x, y: d.y, width: DROP_SIZE, height: DROP_SIZE };
-        const movedX = sweepX(this.world, body, d.vx * dt);
-        if (Math.abs(movedX - d.vx * dt) > 1e-6) d.vx = 0;
-        const res = sweepY(this.world, body, d.vy * dt, { ignorePlatforms: false });
-        if (res.hitFloor) {
-          d.vy = 0;
-          d.vx *= 0.8;
-        } else if (res.hitCeiling) d.vy = 0;
-        d.x = body.x;
-        d.y = body.y;
-      }
-      if (d.age > DROP_LIFETIME) this.drops.splice(i, 1);
-    }
+  spawnDrops(drops: readonly Drop[], owner: number | null = null): void {
+    this.dropSystem.spawn(drops, this.time, owner);
   }
 
   // --- Inventory & equipment commands (validated by shared rules) ---------------------------
 
   selectSlot(i: number): void {
-    if (Number.isInteger(i) && i >= 0 && i < HOTBAR_SIZE && i !== this.player.selectedSlot) {
-      this.player.selectedSlot = i;
-      this.player.hit = null;
-      this.player.combat.chargeStart = Number.NaN;
-    }
+    this.player.select(i);
   }
 
   clickInventory(index: number, button: 'left' | 'right'): void {
@@ -660,8 +572,12 @@ export class GameSimulation {
     const left = this.player.inventory.returnCursor();
     if (left) {
       const m = this.player.motor;
-      this.spawnDrops([{ itemId: left.itemId, count: left.count, x: m.x, y: m.y - m.height / 2 }]);
-      for (const d of this.drops.slice(-1)) d.pickupDelay = 2;
+      this.dropSystem.spawn(
+        [{ itemId: left.itemId, count: left.count, x: m.x, y: m.y - m.height / 2 }],
+        this.time,
+        null,
+        2,
+      );
     }
   }
 
@@ -696,7 +612,11 @@ export class GameSimulation {
       const left = p.inventory.add(gift, 1);
       if (left > 0) {
         const m = p.motor;
-        this.spawnDrops([{ itemId: gift, count: 1, x: m.x, y: m.y - m.height / 2 }]);
+        this.dropSystem.spawn(
+          [{ itemId: gift, count: 1, x: m.x, y: m.y - m.height / 2 }],
+          this.time,
+          p.id,
+        );
       }
     }
     p.refreshStats(this.time);
@@ -796,4 +716,13 @@ export class GameSimulation {
       ...this.player.exportFields(),
     };
   }
+
+  exportAdventurers(): ReturnType<AdventurerDirector['toJSON']> {
+    return this.adventurers.toJSON();
+  }
+}
+
+/** Monster ownership helper kept for UI/debug: the character holding a monster's claim. */
+export function monsterOwner(m: Monster, now: number): number | null {
+  return m.ownerId !== null && now <= m.ownerUntil ? m.ownerId : null;
 }

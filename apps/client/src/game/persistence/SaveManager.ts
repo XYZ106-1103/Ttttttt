@@ -47,6 +47,7 @@ export class SaveManager {
           this.sim.worldId,
           this.sim.exportMeta(this.seed),
           this.sim.exportPlayer(),
+          this.sim.exportAdventurers(),
         );
       } catch (err) {
         console.error('Save failed', err);

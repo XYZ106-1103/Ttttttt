@@ -5,7 +5,7 @@ import { GameSimulation } from './GameSimulation';
 
 const SEED = seedFromString('PROJECT-WORLD');
 const make = (save?: ConstructorParameters<typeof GameSimulation>[0]['save']) =>
-  new GameSimulation({ seed: SEED, worldId: 'test', playerName: 'tester', save });
+  new GameSimulation({ seed: SEED, worldId: 'test', playerName: 'tester', save, adventurers: 0 });
 
 function settle(
   sim: GameSimulation,
@@ -259,3 +259,75 @@ function idle() {
     quickMana: false,
   };
 }
+
+describe('GameSimulation with AI adventurers', () => {
+  it('runs a living population: active near the player, progressing, without errors', () => {
+    const sim = new GameSimulation({ seed: SEED, worldId: 'ai', playerName: 'tester' });
+    const levels0 = sim.adventurers.all.reduce((n, a) => n + a.character.level, 0);
+    // The new-world warm-up already put people to work.
+    expect(levels0).toBeGreaterThan(30);
+    for (let i = 0; i < 60 * 60; i++) sim.tick(SIM_DT, IDLE_INPUT);
+    const active = sim.adventurers.active;
+    expect(active.length).toBeGreaterThan(0);
+    expect(active.length).toBeLessThanOrEqual(14);
+    // Everyone near the player is rendered (active), never simulated invisibly on screen.
+    const px = sim.player.motor.x;
+    for (const a of sim.adventurers.all) {
+      if (a.tier === 'abstract')
+        expect(Math.abs(a.character.motor.x - px) / 16).toBeGreaterThanOrEqual(30);
+    }
+    const levels1 = sim.adventurers.all.reduce((n, a) => n + a.character.level, 0);
+    expect(levels1).toBeGreaterThan(30);
+    expect(levels1).toBeGreaterThanOrEqual(levels0);
+    // Active adventurers are real combatants.
+    for (const a of active)
+      if (a.character.alive) expect(sim.combat.combatants.get(a.character.id)).toBe(a.character);
+  });
+
+  it('credits kills to the adventurer who claimed the monster, not the player', () => {
+    const sim = new GameSimulation({
+      seed: SEED,
+      worldId: 'ai2',
+      playerName: 'tester',
+      monsters: false,
+      warmUp: false,
+    });
+    settle(sim, 0.5);
+    const a = sim.adventurers.active[0];
+    expect(a).toBeDefined();
+    if (!a) return;
+    expect(sim.devSpawn('dew_slime')).toBe(true);
+    const m = sim.monsters.monsters[0];
+    if (!m) return;
+    m.hp = 1;
+    m.ownerId = a.character.id;
+    m.ownerUntil = sim.time + 10;
+    m.damageBy.set(a.character.id, 10);
+    const exp0 = a.character.progress.exp + a.character.level * 1000;
+    const pexp0 = sim.player.progress.exp;
+    sim.combat.kill(m, a.character.id);
+    settle(sim, SIM_DT * 2);
+    expect(a.character.progress.exp + a.character.level * 1000).toBeGreaterThan(exp0);
+    expect(sim.player.progress.exp).toBe(pexp0);
+  });
+
+  it('saves and restores adventurers with their goals and memories', async () => {
+    const store = new MemorySaveStore(true);
+    const sim = new GameSimulation({ seed: SEED, worldId: 'ai3', playerName: 'tester' });
+    settle(sim, 5);
+    const a = sim.adventurers.all[3];
+    a?.memory.add({ t: sim.time, kind: 'helped_by', subject: 'player', importance: 0.7 });
+    await store.saveState('ai3', sim.exportMeta(SEED), sim.exportPlayer(), sim.exportAdventurers());
+    const bundle = await store.load('ai3');
+    const again = new GameSimulation({
+      seed: SEED,
+      worldId: 'ai3',
+      playerName: 'tester',
+      save: { ...bundle, meta: bundle.meta ? { ...bundle.meta, savedAt: Date.now() } : null },
+    });
+    const b = again.adventurers.byKey(a?.key ?? '');
+    expect(b?.character.level).toBe(a?.character.level);
+    expect(b?.memory.events.some((e) => e.kind === 'helped_by')).toBe(true);
+    expect(b?.goal?.kind).toBe(a?.goal?.kind);
+  });
+});

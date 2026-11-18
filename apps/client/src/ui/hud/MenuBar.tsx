@@ -10,7 +10,7 @@ interface MenuEntry {
   readonly icon: string;
   readonly window?: WindowId;
   readonly lockedPhase?: string;
-  readonly action: 'character' | 'inventory' | 'skills' | 'quests' | 'worldMap' | 'menu';
+  readonly action: 'character' | 'inventory' | 'skills' | 'quests' | 'worldMap' | 'roster' | 'menu';
 }
 
 const ENTRIES: readonly MenuEntry[] = [
@@ -37,6 +37,7 @@ const ENTRIES: readonly MenuEntry[] = [
     window: 'worldMap',
     action: 'worldMap',
   },
+  { id: 'roster', labelKey: 'hud.roster', icon: '☺', window: 'roster', action: 'roster' },
   { id: 'menu', labelKey: 'hud.menu', icon: '≡', action: 'menu' },
 ];
 

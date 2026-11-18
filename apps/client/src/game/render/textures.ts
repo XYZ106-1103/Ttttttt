@@ -9,12 +9,8 @@ import {
   type ParallaxLayerArt,
 } from '../art/background/BackgroundArt';
 import type { Appearance } from '../art/character/appearance';
-import {
-  ARM_ANGLES,
-  composeArmFrames,
-  composeCharacterSheet,
-  composePortrait,
-} from '../art/character/CharacterComposer';
+import { ARM_ANGLES, composePortrait } from '../art/character/CharacterComposer';
+import { type ComposedCharacter, composeCharacterAssets } from '../art/character/composeAssets';
 import { FRAME_SIZE } from '../art/character/rig';
 import { hex, withAlpha } from '../art/color';
 import { generateFxAtlas, generateGlow, TORCH_FRAMES } from '../art/fx/FxArt';
@@ -94,25 +90,18 @@ export function registerTileset(scene: Phaser.Scene): Tileset {
   return ts;
 }
 
-/**
- * Compose and register a character sprite sheet + animations. Idempotent per id, so AI
- * adventurers (PHASE 4) can call this lazily as they come into view.
- */
-export function ensureCharacterTexture(
+/** Register composed character assets (from the main thread or a worker) as textures + anims. */
+export function registerComposedCharacter(
   scene: Phaser.Scene,
   id: string,
-  appearance: Appearance,
+  c: ComposedCharacter,
 ): void {
-  const key = characterKey(id);
-  if (scene.textures.exists(key)) return;
   const shoulders = new Map<string, { x: number; y: number }>();
-  const variants: [string, boolean, (anim: string) => string][] = [
-    [key, true, (anim) => characterAnimKey(id, anim)],
-    [characterNoArmKey(id), false, (anim) => characterNoArmAnimKey(id, anim)],
-  ];
-  for (const [texKey, withArm, animKeyOf] of variants) {
-    const sheet = composeCharacterSheet(appearance, undefined, withArm);
-    const tex = addCanvasTexture(scene, texKey, sheet.canvas);
+  for (const sheet of c.sheets) {
+    const texKey = sheet.withArm ? characterKey(id) : characterNoArmKey(id);
+    const animKeyOf = (anim: string) =>
+      sheet.withArm ? characterAnimKey(id, anim) : characterNoArmAnimKey(id, anim);
+    const tex = addBytesTexture(scene, texKey, sheet.width, sheet.height, sheet.bytes);
     for (const f of sheet.frames) {
       tex.add(f.name, 0, f.x, f.y, f.w, f.h);
       if (f.shoulder) shoulders.set(f.name, f.shoulder);
@@ -122,16 +111,51 @@ export function ensureCharacterTexture(
       if (scene.anims.exists(animKey)) scene.anims.remove(animKey);
       scene.anims.create({
         key: animKey,
-        frames: anim.frames.map((_, i) => ({ key: texKey, frame: `${anim.key}_${i}` })),
+        frames: Array.from({ length: anim.count }, (_, i) => ({
+          key: texKey,
+          frame: `${anim.key}_${i}`,
+        })),
         frameRate: anim.frameRate,
         repeat: anim.repeat,
       });
     }
   }
-  const arm = addCanvasTexture(scene, characterArmKey(id), composeArmFrames(appearance));
+  const arm = addBytesTexture(scene, characterArmKey(id), c.arm.width, c.arm.height, c.arm.bytes);
   for (let i = 0; i < ARM_ANGLES; i++)
     arm.add(`arm_${i}`, 0, i * FRAME_SIZE, 0, FRAME_SIZE, FRAME_SIZE);
   rigs.set(id, { shoulders });
+}
+
+function addBytesTexture(
+  scene: Phaser.Scene,
+  key: string,
+  width: number,
+  height: number,
+  bytes: Uint8ClampedArray<ArrayBuffer>,
+): Phaser.Textures.CanvasTexture {
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas unavailable');
+  ctx.putImageData(new ImageData(bytes, width, height), 0, 0);
+  const tex = scene.textures.addCanvas(key, canvas);
+  if (!tex) throw new Error(`Failed to create texture ${key}`);
+  return tex;
+}
+
+/**
+ * Compose and register a character synchronously (the player at boot). AI adventurers use the
+ * worker-backed CharacterTextureQueue instead so composing never stalls a frame.
+ */
+export function ensureCharacterTexture(
+  scene: Phaser.Scene,
+  id: string,
+  appearance: Appearance,
+): void {
+  if (scene.textures.exists(characterKey(id))) return;
+  registerComposedCharacter(scene, id, composeCharacterAssets(appearance));
 }
 
 /** Item atlas for world sprites + data-URL icons for the DOM UI. */

@@ -67,6 +67,7 @@ async function bootstrap(): Promise<void> {
     debugFlushSave(): Promise<void>;
     debugSummon(id: string): boolean;
     debugMonsters(): unknown;
+    debugAdventurers(): unknown;
   }
   const scene = (): Partial<WorldDebug> | null =>
     game.scene.getScene('World') as unknown as Partial<WorldDebug> | null;
@@ -76,6 +77,7 @@ async function bootstrap(): Promise<void> {
     count: (itemId: string) => scene()?.debugCount?.(itemId),
     flush: () => scene()?.debugFlushSave?.(),
     monsters: () => scene()?.debugMonsters?.(),
+    adventurers: () => scene()?.debugAdventurers?.(),
     // Test-only spawning lives behind the same developer command the chat exposes (/summon).
     summon: (id: string) => scene()?.debugSummon?.(id),
     stores,

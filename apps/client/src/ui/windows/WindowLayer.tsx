@@ -2,7 +2,9 @@ import type { WindowId } from '../../app/stores';
 import { useServices } from '../context';
 import { useStore } from '../hooks/useStore';
 import { closeWindow, focusWindow } from '../windowActions';
+import { AdventurerWindow } from './AdventurerWindow';
 import { CharacterWindow } from './CharacterWindow';
+import { RosterWindow } from './RosterWindow';
 import { InventoryWindow } from './InventoryWindow';
 import { JobAdvanceWindow } from './JobAdvanceWindow';
 import { SkillWindow } from './SkillWindow';
@@ -17,6 +19,8 @@ const COMPONENTS: Record<WindowId, typeof CharacterWindow> = {
   inventory: InventoryWindow,
   worldMap: WorldMapWindow,
   skills: SkillWindow,
+  adventurer: AdventurerWindow,
+  roster: RosterWindow,
   jobAdvance: JobAdvanceWindow,
 };
 

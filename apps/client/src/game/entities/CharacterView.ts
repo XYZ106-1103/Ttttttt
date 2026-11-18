@@ -138,7 +138,17 @@ export class CharacterView {
   }
 
   setName(name: string): void {
-    this.nameTag.setText(name);
+    if (this.nameTag.text !== name) this.nameTag.setText(name);
+  }
+
+  /** Name-tag text color (job colors for adventurers). */
+  setTagColor(color: string): void {
+    this.nameTag.setColor(color);
+  }
+
+  /** Name tag position in label space (for speech bubbles). */
+  get tagAnchor(): { x: number; y: number } {
+    return { x: this.nameTag.x, y: this.nameTag.y };
   }
 
   setVisible(v: boolean): void {

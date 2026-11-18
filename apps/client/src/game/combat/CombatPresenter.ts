@@ -15,6 +15,7 @@ import type { CharacterView, CombatLook } from '../entities/CharacterView';
 import { CombatFx, type SlashKind } from '../fx/CombatFx';
 import { DamageNumbers } from '../render/DamageNumbers';
 import type { PointLight } from '../render/LightGrid';
+import { AdventurerRenderer } from '../render/AdventurerRenderer';
 import { MonsterRenderer } from '../render/MonsterRenderer';
 import { ProjectileRenderer } from '../render/ProjectileRenderer';
 import type { GameSimulation, SimNotice } from '../sim/GameSimulation';
@@ -56,6 +57,7 @@ function hex(c: string): number {
  */
 export class CombatPresenter {
   readonly monsters: MonsterRenderer;
+  readonly adventurers: AdventurerRenderer;
   private readonly projectiles: ProjectileRenderer;
   private readonly numbers: DamageNumbers;
   readonly fx: CombatFx;
@@ -83,6 +85,7 @@ export class CombatPresenter {
     this.projectiles = new ProjectileRenderer(scene, worldLayer, overlayLayer);
     this.numbers = new DamageNumbers(scene, overlayLayer);
     this.fx = new CombatFx(scene, worldLayer, overlayLayer, labelLayer);
+    this.adventurers = new AdventurerRenderer(scene, worldLayer, labelLayer, sim.world, this.fx);
   }
 
   /** Accent color for the player's weapon trails. */
@@ -120,6 +123,34 @@ export class CombatPresenter {
     for (const lvl of ev.levelUps) this.onLevelUp(lvl);
     for (const x of ev.exp) this.fx.label(x.x, x.y - 6, `+${x.amount} EXP`, '#d8b8ff', 11, 1.2);
     for (const n of ev.notices) this.onNotice(n);
+    const now = this.sim.time;
+    const dir = this.sim.adventurers;
+    for (const { id, event } of ev.aiActor) {
+      const a = dir.byCharacter(id);
+      if (a) this.adventurers.onAction(a, event, now);
+    }
+    for (const { id, out } of ev.aiUses) {
+      const a = dir.byCharacter(id);
+      if (a) this.adventurers.onUse(a, out, now);
+    }
+    for (const { id } of ev.aiLevelUps) {
+      const a = dir.byCharacter(id);
+      if (a && a.tier === 'active') this.adventurers.onLevelUp(a);
+    }
+    for (const e of ev.ai) {
+      const a = dir.byKey(e.key);
+      if (!a) continue;
+      if (e.type === 'job')
+        pushChat(
+          this.stores,
+          'notice',
+          t('adv.jobChat', { name: a.profile.name.ko, job: t(`job.${e.jobId}`) }),
+        );
+    }
+    ev.aiActor.length = 0;
+    ev.aiUses.length = 0;
+    ev.aiLevelUps.length = 0;
+    ev.ai.length = 0;
     ev.actor.length = 0;
     ev.combat.length = 0;
     ev.monster.length = 0;
@@ -217,13 +248,18 @@ export class CombatPresenter {
     switch (e.type) {
       case 'damage': {
         const isPlayer = e.targetId === p.id;
-        const style = isPlayer ? 'hurt' : e.source === 'dot' ? 'dot' : e.crit ? 'crit' : 'dmg';
+        const isAdventurer =
+          !isPlayer && this.sim.adventurers.byCharacter(e.targetId) !== undefined;
+        const style =
+          isPlayer || isAdventurer ? 'hurt' : e.source === 'dot' ? 'dot' : e.crit ? 'crit' : 'dmg';
         this.numbers.spawn(e.amount, e.x, e.y - 2, style, String(e.targetId));
         if (isPlayer) {
           this.hitFlash++;
           this.camera.shake(e.amount > p.stats.maxHp * 0.15 ? 3 : 1.6, 0.16);
           if (e.source !== 'dot')
             this.fx.spark(p.motor.x, p.motor.y - p.motor.height / 2, false, 0xff7aa8);
+        } else if (isAdventurer) {
+          if (e.source !== 'dot') this.fx.spark(e.x, e.y + 14, false, 0xff9ab8);
         } else {
           this.monsters.hit(e.targetId, now, e.hitstop);
           if (e.source !== 'dot') {
@@ -395,7 +431,7 @@ export class CombatPresenter {
   }
 
   /** Per-frame visuals. */
-  update(dt: number, alpha: number): void {
+  update(dt: number, alpha: number, zoom = 2): void {
     const now = this.sim.time;
     const p = this.sim.player;
     for (let i = this.slashes.length - 1; i >= 0; i--) {
@@ -443,6 +479,7 @@ export class CombatPresenter {
     }
     this.monsters.update(this.sim.monsters.monsters, alpha, now, dt);
     this.projectiles.update(this.sim.combat.projectiles, dt);
+    this.adventurers.update(this.sim.adventurers.active, alpha, now, dt, zoom);
     this.numbers.update(dt);
     this.fx.update(dt, now);
   }
@@ -531,6 +568,7 @@ export class CombatPresenter {
 
   destroy(): void {
     this.monsters.destroy();
+    this.adventurers.destroy();
     this.projectiles.destroy();
     this.numbers.destroy();
     this.fx.destroy();

@@ -1,7 +1,7 @@
 # PROJECT WORLD — 아키텍처
 
 이 문서는 전체 목표(AI 모험가가 살아가는 상용 수준 2D 샌드박스 MMORPG)를 기준으로 한 구조 설계와,
-PHASE 1에서 실제로 구현된 범위를 구분해 기록합니다.
+각 PHASE에서 실제로 구현된 범위를 구분해 기록합니다(현재 PHASE 4 완료).
 
 ## 1. 설계 원칙
 
@@ -27,7 +27,10 @@ packages/shared/src
 ├── sandbox/                ItemRegistry, Inventory(커서 스택), Equipment, crafting, interaction(채굴·설치·벌목·채집)
 ├── combat/                 actions(행동 타임라인 데이터 모델), CombatWorld(히트 윈도·투사체·장판·피해 판정),
 │                           ActorCombat(콤보·공중·차징·스킬·회피 상태 기계), damage, stats, status, shapes, progression
-├── monsters/               Monster, brains(슬라임·딱정벌레·박쥐·도깨비불 FSM), golem(보스), spawning, MonsterManager
+├── monsters/               Monster(소유권), brains(슬라임·딱정벌레·박쥐·도깨비불 FSM), golem(보스), spawning, MonsterManager
+├── actors/                 Character(플레이어·AI 공용), stepCharacter(의도 → 모터·전투·아이템 사용), DropSystem(전리품 우선권)
+├── ai/                     AI 모험가 (6절): personality, knowledge, goals, memory, Adventurer, brain, director
+│   └── nav/                NavGrid(플랫포머 내비게이션 그래프), pathfind(A*, PathFollower)
 ├── time/WorldClock.ts      시간대·낮밤·일차
 ├── world/
 │   ├── Chunk.ts            32×32 타일, fg/bg Uint16Array, version/modified 플래그
@@ -47,11 +50,12 @@ apps/client/src
 ├── game/
 │   ├── createGame.ts       Phaser 설정 (WebGL, pixelArt, RESIZE, 조명 파이프라인 등록)
 │   ├── scenes/             BootScene(절차적 텍스처 생성·진행률), WorldScene(오케스트레이터)
-│   ├── sim/GameSimulation  월드 + 시계 + 플레이어 캐릭터 (렌더링 코드 없음)
+│   ├── sim/GameSimulation  월드 + 시계 + 플레이어 + 몬스터 + AI 모험가 + 드롭 (렌더링 코드 없음)
 │   ├── FixedStepper.ts     고정 스텝 누산기 + 보간 alpha
 │   ├── display.ts          정수 배율 정책 (1080p → 2×, 540 아트 픽셀)
 │   ├── camera/             CameraController (룩어헤드, 착지 높이 기준 수직 추적, 흔들림)
-│   ├── render/             ChunkRenderer, ObjectRenderer, LightGrid, LightmapRenderer, LightingPipeline, textures
+│   ├── render/             ChunkRenderer, ObjectRenderer, LightGrid, LightmapRenderer, LightingPipeline, textures,
+│   │                       AdventurerRenderer(이름표·말풍선), CharacterTextureQueue + characterWorker(외형 합성 워커)
 │   ├── background/         ParallaxBackground, skyPalette (시간대 키프레임)
 │   ├── entities/           CharacterView(애니메이션 FSM·스쿼시&스트레치), Spring, FrameEvents
 │   ├── fx/                 ParticleFx (먼지·낙엽·반딧불·불씨)
@@ -131,7 +135,45 @@ apps/client/src
 - **클라이언트 표현**: `CombatPresenter`가 시뮬레이션 이벤트를 받아 몬스터/투사체 스프라이트, 무기 궤적(히트
   윈도 타이밍에 맞춰 예약), 데미지 숫자, hitstop, 흔들림, 잔상, 레벨업 연출, HUD 스토어를 갱신합니다.
 
-## 6. 저장 (브라우저 IndexedDB)
+## 6. AI 모험가 (PHASE 4)
+
+외부 AI 서비스·LLM 없이 자체 게임 로직으로 구현했습니다. 전부 `packages/shared`에 있어 PHASE 6 서버에서 그대로
+실행됩니다. **AI는 플레이어와 같은 규칙으로 움직입니다** — 두뇌는 `CharacterIntent`(이동 입력·조준·공격·스킬·
+회피·아이템 사용)만 만들고, 월드·전투·인벤토리 변경은 플레이어와 같은 `stepCharacter()` → `applyItemUse()` /
+`ActorCombat` 경로로만 일어납니다. 순간이동·무적·아이템 생성 같은 AI 전용 지름길은 없습니다(추상 LOD 제외, 아래).
+
+**계층 구조**
+
+| 계층                      | 주기        | 역할                                                                                                        |
+| ------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| 관리(`housekeeping`)      | 1.5–2.5초   | 스탯 자동 분배, 전직·스킬 습득, 목표를 향한 제작, 더 좋은 장비 착용, 단축 슬롯 정리, 목표 갱신·완료 판정    |
+| 판단(`scoreActions`)      | 약 0.5초    | 10개 행동의 효용 점수(성격·체력·목표·시간대·기억·위험) → 최고 점수 선택, 현재 행동 +0.12 가산(히스테리시스) |
+| 행동(fight/gather/mine/…) | 매 틱(60Hz) | 경로 추종, 공격 사거리 유지, 활 차징, 스킬, 예고 공격 회피, 채굴 계단 파기, 물약                            |
+| 이동(`PathFollower`)      | 매 틱       | 내비게이션 경로 재생 — 점프는 그래프가 검증한 입력 스크립트를 그대로 재생, 1.4초 끼임 시 재탐색             |
+
+- **성격·목표**: 8특성 성격 → 생활 방식(사냥꾼·장인·탐험가), 선호 직업, 도주·물약 기준, 말투. 목표(`level`·
+  `item`·`explore`·`slay`, 20분 제한)는 `knowledge.ts`가 아이템 출처(타일·오브젝트·몬스터 전리품·레시피)를 역추적해
+  "철 검 → 철광석 → 지하 32칸 채굴" 같은 하위 작업으로 풉니다.
+- **길찾기**: `NavGrid`는 1×3타일 몸이 설 수 있는 칸을 노드로, 걷기·자동 오르기·낙하·발판 통과·점프를 간선으로
+  둡니다. 점프 간선은 실제 `CharacterMotor`로 5가지 입력(방향 세기 × 점프 유지 시간)을 시뮬레이션해 착지점을
+  찾고 캐시합니다(타일 변경 시 주변 무효화). A\*는 확장 수 700으로 제한하고, 점프는 걷기로 막혔거나 목표가 위쪽/
+  근처일 때만 탐색합니다. 틱당 경로 탐색은 1회로 제한해 프레임 스파이크를 막습니다.
+- **기억·관계**: 사건 10종을 중요도와 함께 저장(최대 60개, 반감기 20분, 중요도 0.8 이상은 거의 잊지 않음).
+  죽은 장소 근처는 위험으로 기억해 피하고, 자신을 도와준 플레이어(같은 몬스터를 함께 공격)에게는 호감도가
+  오릅니다(관계 데이터 구조는 모험가끼리도 쓸 수 있게 되어 있으며 PHASE 5에서 확장).
+- **공정성**: 몬스터는 첫 타격자가 10초간 소유(다른 모험가는 손대지 않음), 전리품은 처치 기여자가 8초간 우선권.
+  시작 마을(±34칸)은 채굴 금지.
+- **LOD** (`AdventurerDirector`): 플레이어 56칸 이내 최대 14명은 **완전 시뮬레이션**(엔티티·물리·전투), 76칸
+  밖은 **추상 시뮬레이션**(1초 단위: 활동 선택 → 지표 높이로 이동 → 사냥은 DPS·몬스터 HP로 처치 수와 피해를,
+  채굴·채집은 확률로 결과를 계산). 화면 안(36칸)에 추상 상태로 남은 모험가는 화면 밖으로 밀어내 "갑자기
+  나타남"을 막습니다. 오프라인 시간은 최대 2시간을 10초 단위로 따라잡고, 새 월드는 8분을 미리 진행합니다.
+- **클라이언트**: 30명의 외형 합성(1명당 약 260ms)은 Web Worker에서 하고 프레임당 텍스처 1개만 업로드합니다
+  (워커를 못 쓰면 메인 스레드 대체). `AdventurerRenderer`가 `CharacterView`(플레이어와 같은 애니메이션·무기
+  모션)와 이름표·말풍선을 그립니다. UI는 스토어(2Hz)로만 모험가 정보를 받습니다.
+- **LLM**: 사용하지 않습니다. 대사는 말투 5종 × 상황 10종 템플릿(i18n). 추후 승인 시에도 LLM은 별도 모듈에서
+  대사만 생성하고 게임 상태를 직접 바꾸지 못하게 합니다.
+
+## 7. 저장 (브라우저 IndexedDB)
 
 - `SaveStore` 인터페이스(IndexedDB 구현 + 메모리 대체). PHASE 6에서 서버 구현으로 교체.
 - 월드: **수정된 청크만** RLE로 저장(`World.collectDirty()` 증분 저장, 5초 자동 저장 + 탭 숨김/닫힘 시 즉시).
@@ -140,8 +182,10 @@ apps/client/src
 - 형식 버전 필드(`CHUNK_FORMAT_VERSION`, `SAVE_VERSION`)로 마이그레이션. v2(PHASE 3)는 레벨·직업·스킬·
   단축키·장비·HP/MP를 저장하고, v1 세이브는 기본값 + 시작 무기·물약 지급으로 이전합니다. 불러올 때 모든 값을
   검증(모르는 스킬·아이템 제거, 레벨·수치 범위 제한)합니다.
+- AI 모험가: 월드별 `${worldId}|adventurers` 키에 모험가마다 캐릭터 스냅샷(플레이어와 같은 형식)·위치·목표·
+  기억·추상 활동을 저장합니다. 프로필(이름·성격·외형)은 시드에서 다시 만들어지므로 저장하지 않습니다.
 
-## 7. 이동·물리 (CharacterMotor)
+## 8. 이동·물리 (CharacterMotor)
 
 `stepMotor(state, input, grid, config, dt)` — 순수 함수, 고정 스텝.
 
@@ -154,7 +198,7 @@ apps/client/src
 
 튜닝 값은 전부 `data/movement.ts`에 있으며 단위 테스트가 점프 높이·코요테·버퍼·스텝·발판·결정론을 검증합니다.
 
-## 8. 절차적 픽셀 아트 파이프라인
+## 9. 절차적 픽셀 아트 파이프라인
 
 모든 생성기는 DOM 없는 `PixelCanvas`(Uint32 RGBA)에 그리므로 테스트·오프라인 미리보기(`art:preview`)가 가능합니다.
 
@@ -180,25 +224,24 @@ apps/client/src
 손그림 교체: 같은 텍스처 키와 프레임 이름(`run_0`…, `tree_oak_0_0`…, 타일 프레임 인덱스 규약)으로
 아틀라스를 `BootScene.preload()`에서 로드하고 해당 생성 단계를 건너뛰면 됩니다.
 
-## 9. UI
+## 10. UI
 
 React 19 + 순수 CSS 디자인 시스템(토큰: `ui/styles/index.css`). Galmuri 픽셀 폰트(OFL).
 상태 표시(초상화는 캐릭터 스프라이트에서 자동 생성), HP/MP/EXP, 스킬 바·버프 바·보스 바·사망 화면,
 캐릭터(스탯 분배·전직)·스킬·전직·인벤토리(장비 칸) 창, 미니맵(실제 월드 데이터, 3Hz),
 시계/일차, 지역 배너, 채팅(로컬)·시스템 로그·개발 명령, 퀵슬롯, 메뉴 바, 드래그 가능한 창
-(캐릭터 정보·설정·조작법), 일시정지 메뉴, 로딩/타이틀/오류 화면. 단축키는 `InputManager.onUiAction`.
+(캐릭터 정보·설정·조작법·모험가 명부·모험가 정보 카드), 일시정지 메뉴, 로딩/타이틀/오류 화면. 단축키는 `InputManager.onUiAction`.
 
 > 메뉴를 열어도 월드는 멈추지 않습니다 — 영속 온라인 월드를 전제로 한 설계입니다(입력만 차단).
 
-## 10. 향후 구조 (계획 — 아직 구현되지 않음)
+## 11. 향후 구조 (계획 — 아직 구현되지 않음)
 
 ```
 apps/server (PHASE 6)     Node.js + TypeScript + WebSocket 게이트웨이, 존(zone) 시뮬레이션 프로세스
   ├── sim                 packages/shared 시뮬레이션의 권한 있는 실행, 입력 검증
   ├── persistence         PostgreSQL (계정·캐릭터·수정된 청크·경제), Redis (세션·프레즌스·큐)
   └── economy             거래소·상점 — 모든 거래 서버 검증, 아이템 복제 방지
-packages/ai (PHASE 4–5)   Utility AI(행동 점수) + 행동 트리/FSM, 성격·기억·관계, LOD 시뮬레이션
-                          (근거리=엔티티, 같은 지역=간소화, 원거리=추상, 오프라인=결과 계산)
+packages/shared/src/ai    (PHASE 4 구현됨) PHASE 5에서 AI 간 대화·파티·길드·거래·경제 계층 추가
 packages/llm (선택)        LLM 대화 어댑터 — 별도 모듈, 게임 상태 직접 수정 불가, 사용자 승인 전 연결 금지
 ```
 
@@ -206,4 +249,4 @@ packages/llm (선택)        LLM 대화 어댑터 — 별도 모듈, 게임 상�
 
 외부 LLM/AI API는 **사용자 승인 없이 연결하지 않습니다**. 필요 시 목적·모델·예상 비용·대체 가능성·성능 영향을
 먼저 보고합니다. AI 모험가의 이동·전투·채집·제작·성장·거래는 외부 API 없이 자체 게임 로직으로 구현합니다.
-PHASE 1에는 어떤 AI 서비스도 연결되어 있지 않습니다.
+현재(PHASE 4)까지 어떤 외부 AI 서비스·LLM도 연결되어 있지 않습니다.

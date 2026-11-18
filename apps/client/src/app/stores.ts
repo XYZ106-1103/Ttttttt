@@ -139,8 +139,62 @@ export interface ChatState {
   readonly messages: readonly ChatMessage[];
 }
 
+export interface AdventurerSummary {
+  readonly key: string;
+  readonly name: string;
+  readonly level: number;
+  readonly jobId: string;
+  readonly archetype: string;
+  readonly active: boolean;
+  /** Current action (active) or abstract activity. */
+  readonly doing: string;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly alive: boolean;
+  /** Tile column relative to the spawn. */
+  readonly x: number;
+  readonly affinity: number;
+}
+
+export interface AdventurerMemoryView {
+  readonly kind: string;
+  readonly detail?: string;
+  readonly ago: number;
+}
+
+export interface AdventurerDetail extends AdventurerSummary {
+  readonly personality: Readonly<Record<string, number>>;
+  readonly tone: string;
+  readonly skill: number;
+  readonly preferredJob: string;
+  readonly nightOwl: boolean;
+  readonly goal: {
+    readonly kind: string;
+    readonly params: Readonly<Record<string, string | number>>;
+  } | null;
+  readonly memories: readonly AdventurerMemoryView[];
+  readonly scores: readonly (readonly [string, number])[];
+  readonly met: number;
+  readonly helped: number;
+  readonly weapon: string | null;
+}
+
+export interface AdventurersState {
+  readonly list: readonly AdventurerSummary[];
+  readonly selected: string | null;
+  readonly detail: AdventurerDetail | null;
+}
+
 export type WindowId =
-  'character' | 'settings' | 'keyGuide' | 'inventory' | 'worldMap' | 'skills' | 'jobAdvance';
+  | 'adventurer'
+  | 'roster'
+  | 'character'
+  | 'settings'
+  | 'keyGuide'
+  | 'inventory'
+  | 'worldMap'
+  | 'skills'
+  | 'jobAdvance';
 
 export interface UiState {
   readonly windows: readonly WindowId[];
@@ -178,6 +232,7 @@ export interface Stores {
   readonly inventory: Store<InventoryState>;
   readonly feed: Store<FeedState>;
   readonly combat: Store<CombatState>;
+  readonly adventurers: Store<AdventurersState>;
 }
 
 const ZERO_STATS = { str: 0, dex: 0, int: 0, vit: 0, luk: 0 };
@@ -275,6 +330,7 @@ export function createStores(): Stores {
       levelUp: 0,
       lastLevel: 1,
     }),
+    adventurers: createStore<AdventurersState>({ list: [], selected: null, detail: null }),
   };
 }
 

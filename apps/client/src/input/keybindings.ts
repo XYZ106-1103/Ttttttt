@@ -23,6 +23,7 @@ export type UiAction =
   | 'skills'
   | 'quests'
   | 'worldMap'
+  | 'roster'
   | 'keyGuide'
   | 'debug'
   | 'hotbar1'
@@ -77,6 +78,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   skills: ['KeyK'],
   quests: ['KeyL'],
   worldMap: ['KeyM'],
+  roster: ['KeyO'],
   keyGuide: ['F1'],
   debug: ['F3'],
   hotbar1: ['Digit1'],

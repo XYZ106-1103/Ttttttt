@@ -21,6 +21,10 @@ export interface SpawnSettings {
   readonly safeTo: number;
   readonly night: boolean;
   readonly enabled: boolean;
+  /** Extra characters around which monsters may spawn (active AI adventurers). */
+  readonly anchors?: readonly Combatant[];
+  /** Global cap on live monsters. */
+  readonly maxMonsters?: number;
 }
 
 const CORPSE_TIME = 1.1;
@@ -127,6 +131,7 @@ export class MonsterManager {
       }
 
       const target = this.nearestTarget(m, players);
+      m.targetId = target?.id ?? null;
       const ctx: BrainContext = { ...ctxBase, target };
       const input = stepBrain(m, ctx);
       if (input) {
@@ -176,7 +181,8 @@ export class MonsterManager {
     this.spawnTimer -= dt;
     if (this.spawnTimer > 0) return;
     this.spawnTimer = SPAWN_INTERVAL;
-    for (const p of players) {
+    if (this.aliveCount() >= (s.maxMonsters ?? 40)) return;
+    for (const p of [...players, ...(s.anchors ?? [])]) {
       if (!p.alive) continue;
       let near = 0;
       for (const m of this.monsters) {

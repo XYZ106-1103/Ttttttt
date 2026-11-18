@@ -1,4 +1,10 @@
-import type { BaseStats, EquipmentData, InventoryData, SerializedChunk } from '@world/shared';
+import type {
+  AdventurerSave,
+  BaseStats,
+  EquipmentData,
+  InventoryData,
+  SerializedChunk,
+} from '@world/shared';
 
 /** v2 (PHASE 3) adds progression, job, skills and equipment; v1 saves load with defaults. */
 export const SAVE_VERSION = 2;
@@ -39,9 +45,16 @@ export interface SaveBundle {
   readonly meta: WorldMeta | null;
   readonly player: PlayerSave | null;
   readonly chunks: readonly SerializedChunk[];
+  /** AI adventurers (PHASE 4); null for older saves. */
+  readonly adventurers?: readonly AdventurerSave[] | null;
 }
 
-export const EMPTY_SAVE: SaveBundle = { meta: null, player: null, chunks: [] };
+export const EMPTY_SAVE: SaveBundle = { meta: null, player: null, chunks: [], adventurers: null };
+
+/** Saves from this version or older are migrated on load; newer ones are ignored. */
+function supported(v: unknown): boolean {
+  return Number.isInteger(v) && (v as number) >= 1 && (v as number) <= SAVE_VERSION;
+}
 
 /**
  * Where a world is stored. PHASE 2 keeps saves in the browser (IndexedDB); PHASE 6 adds a
@@ -52,7 +65,12 @@ export interface SaveStore {
   readonly persistent: boolean;
   load(worldId: string): Promise<SaveBundle>;
   saveChunks(worldId: string, chunks: readonly SerializedChunk[]): Promise<void>;
-  saveState(worldId: string, meta: WorldMeta, player: PlayerSave): Promise<void>;
+  saveState(
+    worldId: string,
+    meta: WorldMeta,
+    player: PlayerSave,
+    adventurers?: readonly AdventurerSave[],
+  ): Promise<void>;
   clear(worldId: string): Promise<void>;
 }
 
@@ -61,28 +79,41 @@ export class MemorySaveStore implements SaveStore {
   private readonly chunks = new Map<string, SerializedChunk>();
   private meta: WorldMeta | null = null;
   private player: PlayerSave | null = null;
+  private adventurers: readonly AdventurerSave[] | null = null;
 
   constructor(persistent = false) {
     this.persistent = persistent;
   }
 
   async load(_worldId?: string): Promise<SaveBundle> {
-    return { meta: this.meta, player: this.player, chunks: [...this.chunks.values()] };
+    return {
+      meta: this.meta,
+      player: this.player,
+      chunks: [...this.chunks.values()],
+      adventurers: this.adventurers,
+    };
   }
 
   async saveChunks(_worldId: string, chunks: readonly SerializedChunk[]): Promise<void> {
     for (const c of chunks) this.chunks.set(`${c.cx},${c.cy}`, c);
   }
 
-  async saveState(_worldId: string, meta: WorldMeta, player: PlayerSave): Promise<void> {
+  async saveState(
+    _worldId: string,
+    meta: WorldMeta,
+    player: PlayerSave,
+    adventurers?: readonly AdventurerSave[],
+  ): Promise<void> {
     this.meta = meta;
     this.player = player;
+    if (adventurers) this.adventurers = adventurers;
   }
 
   async clear(): Promise<void> {
     this.chunks.clear();
     this.meta = null;
     this.player = null;
+    this.adventurers = null;
   }
 }
 
@@ -126,15 +157,19 @@ export class IdbSaveStore implements SaveStore {
 
   async load(worldId: string): Promise<SaveBundle> {
     const tx = this.db.transaction(['meta', 'players', 'chunks'], 'readonly');
-    const [meta, player, chunks] = await Promise.all([
+    const [meta, player, chunks, adventurers] = await Promise.all([
       req(tx.objectStore('meta').get(worldId)) as Promise<WorldMeta | undefined>,
       req(tx.objectStore('players').get(worldId)) as Promise<PlayerSave | undefined>,
       req(tx.objectStore('chunks').getAll(this.range(worldId))) as Promise<SerializedChunk[]>,
+      req(tx.objectStore('players').get(`${worldId}|adventurers`)) as Promise<
+        AdventurerSave[] | undefined
+      >,
     ]);
     return {
-      meta: meta?.v === SAVE_VERSION ? meta : null,
-      player: player?.v === SAVE_VERSION ? player : null,
+      meta: meta && supported(meta.v) ? meta : null,
+      player: player && supported(player.v) ? player : null,
       chunks: chunks ?? [],
+      adventurers: Array.isArray(adventurers) ? adventurers : null,
     };
   }
 
@@ -146,10 +181,16 @@ export class IdbSaveStore implements SaveStore {
     await done(tx);
   }
 
-  async saveState(worldId: string, meta: WorldMeta, player: PlayerSave): Promise<void> {
+  async saveState(
+    worldId: string,
+    meta: WorldMeta,
+    player: PlayerSave,
+    adventurers?: readonly AdventurerSave[],
+  ): Promise<void> {
     const tx = this.db.transaction(['meta', 'players'], 'readwrite');
     tx.objectStore('meta').put(meta, worldId);
     tx.objectStore('players').put(player, worldId);
+    if (adventurers) tx.objectStore('players').put(adventurers, `${worldId}|adventurers`);
     await done(tx);
   }
 
@@ -157,6 +198,7 @@ export class IdbSaveStore implements SaveStore {
     const tx = this.db.transaction(['meta', 'players', 'chunks'], 'readwrite');
     tx.objectStore('meta').delete(worldId);
     tx.objectStore('players').delete(worldId);
+    tx.objectStore('players').delete(`${worldId}|adventurers`);
     tx.objectStore('chunks').delete(this.range(worldId));
     await done(tx);
   }
