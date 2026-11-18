@@ -1,7 +1,6 @@
 import Phaser from 'phaser';
 import {
   CHUNK_PIXELS,
-  deriveStats,
   HAND_SPEED,
   HOTBAR_SIZE,
   itemRegistry,
@@ -23,6 +22,8 @@ import { accumulate, createFrameEvents, resetFrameEvents } from '../entities/Fra
 import { FixedStepper } from '../FixedStepper';
 import { ParticleFx } from '../fx/ParticleFx';
 import { InteractionController } from '../interaction/InteractionController';
+import { CombatPresenter } from '../combat/CombatPresenter';
+import { SKILL_ACTIONS } from '../../input/keybindings';
 import { SaveManager } from '../persistence/SaveManager';
 import { EMPTY_SAVE } from '../persistence/SaveStore';
 import { ChunkRenderer, type ViewRect } from '../render/ChunkRenderer';
@@ -34,7 +35,7 @@ import { LightmapRenderer } from '../render/LightmapRenderer';
 import { ObjectRenderer } from '../render/ObjectRenderer';
 import { TorchRenderer } from '../render/TorchRenderer';
 import type { GameServices } from '../services';
-import { GameSimulation } from '../sim/GameSimulation';
+import { type ActionIntent, GameSimulation, IDLE_ACTION } from '../sim/GameSimulation';
 import { WORLD_ID, WORLD_SEED } from '../worldConfig';
 
 export { WORLD_SEED };
@@ -89,6 +90,10 @@ export class WorldScene extends Phaser.Scene {
   private drops!: DropRenderer;
   private torches!: TorchRenderer;
   private saves!: SaveManager;
+  private combatView!: CombatPresenter;
+  private publishedPlayerVersion = -1;
+  private publishedEquipVersion = -1;
+  private playerPublishTimer = 0;
 
   private zoom = 2;
   private viewW = 960;
@@ -188,6 +193,16 @@ export class WorldScene extends Phaser.Scene {
     );
     this.player.runSpeed = this.sim.movement.runSpeed;
     this.player.setVisible(false);
+    this.combatView = new CombatPresenter(
+      this,
+      this.worldLayer,
+      this.overlayLayer,
+      this.labelLayer,
+      this.sim,
+      this.player,
+      this.cameraCtl,
+      stores,
+    );
     this.saves = new SaveManager(this.services.saveStore, this.sim, seed);
 
     this.onResize();
@@ -213,6 +228,34 @@ export class WorldScene extends Phaser.Scene {
       returnCursor: () => this.sim.returnCursor(),
       craft: (id, times) => this.sim.craft(id, times),
       resetWorld: (start) => this.resetWorld(start),
+      clickEquipment: (slot) => this.sim.clickEquipment(slot),
+      allocateStat: (stat, n) => this.sim.allocateStat(stat, n),
+      autoAllocate: () => this.sim.autoAllocate(),
+      learnSkill: (id) => this.sim.learnSkill(id),
+      setSkillSlot: (slot, id) => this.sim.setSkillSlot(slot, id),
+      advanceJob: (id) => this.sim.advanceJob(id),
+      respawn: () => {
+        const ok = this.sim.requestRespawn();
+        if (ok) this.cameraCtl.snap(this.playerTarget(), this.viewW, this.viewH, this.bounds());
+        return ok;
+      },
+      devLevel: (n) => this.sim.devSetLevel(n),
+      devSummon: (id) => this.sim.devSpawn(id),
+      devGive: (id, n) => {
+        if (!itemRegistry.has(id)) return false;
+        this.sim.player.inventory.add(id, Math.max(1, Math.min(999, Math.floor(n))));
+        return true;
+      },
+      devHeal: () => {
+        const p = this.sim.player;
+        if (!p.alive) return;
+        p.hp = p.stats.maxHp;
+        p.mp = p.stats.maxMp;
+      },
+      setMonsters: (on) => {
+        this.sim.monstersEnabled = on;
+        if (!on) this.sim.monsters.clear();
+      },
       getWorld: () => this.sim.world,
       getExplored: () => this.sim.explored,
       getPlayerTile: () => ({
@@ -222,7 +265,7 @@ export class WorldScene extends Phaser.Scene {
     });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.shutdown());
 
-    this.publishPlayer();
+    this.publishPlayer(true);
     this.publishInventory(true);
     stores.world.set({ seed: world.seed });
     stores.app.set({
@@ -343,6 +386,39 @@ export class WorldScene extends Phaser.Scene {
     return { x: m.x, y: m.y, vx: m.vx, facing: m.facing, grounded: m.grounded };
   }
 
+  /** Combat intent for this frame (edges are consumed once per frame). */
+  private readAction(canUse: boolean): ActionIntent {
+    const input = this.services.input;
+    const press = this.interaction.consumeAttackPress();
+    let skillSlot: number | null = null;
+    SKILL_ACTIONS.forEach((a, i) => {
+      if (input.consumePressed(a) && skillSlot === null) skillSlot = i;
+    });
+    const dodge = input.consumePressed('dodge');
+    const quickHeal = input.consumePressed('quickHeal');
+    const quickMana = input.consumePressed('quickMana');
+    if (!canUse)
+      return {
+        ...IDLE_ACTION,
+        aimX: this.interaction.aim.x,
+        aimY: this.interaction.aim.y,
+        skillSlot,
+        dodge,
+        quickHeal,
+        quickMana,
+      };
+    return {
+      attackPressed: press,
+      attackHeld: this.interaction.leftDown,
+      aimX: this.interaction.aim.x,
+      aimY: this.interaction.aim.y,
+      skillSlot,
+      dodge,
+      quickHeal,
+      quickMana,
+    };
+  }
+
   private readInput(): MotorInput {
     const input = this.services.input;
     return {
@@ -366,7 +442,11 @@ export class WorldScene extends Phaser.Scene {
     const { stores, input } = this.services;
     const ui = stores.ui.get();
     const playing = this.mode === 'playing';
-    const blockingWindow = ui.windows.includes('inventory') || ui.windows.includes('worldMap');
+    const blockingWindow =
+      ui.windows.includes('inventory') ||
+      ui.windows.includes('worldMap') ||
+      ui.windows.includes('skills') ||
+      ui.windows.includes('jobAdvance');
     input.gameplayEnabled = playing && !ui.chatOpen && !ui.menuOpen;
     const canUse = input.gameplayEnabled && !blockingWindow;
 
@@ -378,12 +458,26 @@ export class WorldScene extends Phaser.Scene {
       );
     }
     const intent = this.interaction.update(this.view, this.zoom, this.sim, playing && canUse);
+    const action = playing && input.gameplayEnabled ? this.readAction(canUse) : IDLE_ACTION;
 
     // --- Simulation (fixed step) ------------------------------------------------------------
     resetFrameEvents(this.frameEvents);
     if (playing) {
+      let first = true;
       const steps = this.stepper.advance(dt, () => {
-        this.sim.tick(SIM_DT, this.readInput(), intent);
+        // Edge-triggered inputs only go to the first tick of the frame.
+        const a = first
+          ? action
+          : {
+              ...action,
+              attackPressed: false,
+              skillSlot: null,
+              dodge: false,
+              quickHeal: false,
+              quickMana: false,
+            };
+        first = false;
+        this.sim.tick(SIM_DT, this.readInput(), intent, a);
         accumulate(this.frameEvents, this.sim.player.motor.events);
       });
       if (steps > 0) {
@@ -394,6 +488,7 @@ export class WorldScene extends Phaser.Scene {
       this.stepper.advance(dt, () => this.sim.tickAmbient(SIM_DT));
     }
     this.consumeSimEvents();
+    this.combatView.consume(this.zoom);
 
     // --- Player view & camera ---------------------------------------------------------------
     const p = this.sim.player;
@@ -405,6 +500,7 @@ export class WorldScene extends Phaser.Scene {
       const stack = p.inventory.get(p.selectedSlot);
       this.player.setHeldItem(stack?.itemId ?? null);
       const aim = canUse ? this.interaction.aim : null;
+      const look = this.combatView.look();
       this.player.update(
         dt,
         px,
@@ -415,7 +511,8 @@ export class WorldScene extends Phaser.Scene {
         this.zoom,
         aim,
         this.sim.time,
-        this.interaction.holding,
+        this.interaction.holding && this.sim.heldMode() === 'sandbox',
+        look,
       );
       this.cameraCtl.update(
         { x: px, y: py, vx: m.vx, facing: m.facing, grounded: m.grounded },
@@ -451,6 +548,7 @@ export class WorldScene extends Phaser.Scene {
     this.objects.update(view, this.elapsed);
     this.torches.update(this.elapsed);
     this.drops.update(this.sim.drops, this.elapsed);
+    if (playing) this.combatView.update(dt, a);
     const sky = this.parallax.update(view, this.sim.clock.timeOfDay, dt, this.elapsed);
     const lights: PointLight[] = [];
     const fires: { x: number; y: number }[] = [];
@@ -465,12 +563,14 @@ export class WorldScene extends Phaser.Scene {
       });
       fires.push({ x: l.x, y: l.y });
     }
+    if (playing) this.combatView.collectLights(lights);
     this.lightmap.update(view, sky.ambient, lights, this.elapsed);
     this.fx.updateAmbient(dt, view, sky.stars, this.treeTops(view), fires);
 
     if (playing) {
       this.saves.update(dt);
       this.trackExplored(dt, view);
+      this.combatView.publish(dt);
     }
     this.evictFarChunks(dt, view);
     this.publish(dt);
@@ -585,21 +685,49 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  private publishPlayer(): void {
+  private publishPlayer(force = false): void {
     const p = this.sim.player;
-    const d = deriveStats(p.progress);
+    const changed =
+      force ||
+      p.version !== this.publishedPlayerVersion ||
+      p.equipment.version !== this.publishedEquipVersion;
+    const st = p.stats;
+    if (changed) {
+      this.publishedPlayerVersion = p.version;
+      this.publishedEquipVersion = p.equipment.version;
+      this.services.stores.player.set({
+        name: p.name,
+        jobId: p.jobId,
+        level: p.progress.level,
+        exp: p.progress.exp,
+        expToNext: this.sim.expToNext(),
+        stats: p.progress.stats,
+        totals: st.totals,
+        statPoints: p.progress.statPoints,
+        skillPoints: p.progress.skillPoints,
+        skills: p.skills,
+        skillBar: p.skillBar,
+        equipment: p.equipment.snapshot(),
+        version: p.version * 1000 + p.equipment.version,
+      });
+    }
     this.services.stores.player.set({
-      name: p.name,
-      jobId: p.jobId,
-      level: p.progress.level,
+      hp: Math.ceil(p.hp),
+      maxHp: st.maxHp,
+      mp: Math.floor(p.mp),
+      maxMp: st.maxMp,
       exp: p.progress.exp,
-      expToNext: this.sim.expToNext(),
-      hp: p.hp,
-      maxHp: d.maxHp,
-      mp: p.mp,
-      maxMp: d.maxMp,
-      stats: p.progress.stats,
-      statPoints: p.progress.statPoints,
+      derived: {
+        attack: Math.round(st.attack),
+        magic: Math.round(st.magic),
+        defense: Math.round(st.defense),
+        critRate: st.critRate,
+        critDamage: st.critDamage,
+        moveSpeed: st.moveSpeed,
+        attackSpeed: st.attackSpeed,
+        hpRegen: st.hpRegen,
+        mpRegen: st.mpRegen,
+      },
     });
   }
 
@@ -627,6 +755,16 @@ export class WorldScene extends Phaser.Scene {
     const { stores } = this.services;
     const m = this.sim.player.motor;
     this.publishInventory();
+    this.playerPublishTimer -= dt;
+    const p = this.sim.player;
+    if (
+      this.playerPublishTimer <= 0 ||
+      p.version !== this.publishedPlayerVersion ||
+      p.equipment.version !== this.publishedEquipVersion
+    ) {
+      this.playerPublishTimer = 0.1;
+      this.publishPlayer();
+    }
     this.publishTimer -= dt;
     if (this.publishTimer <= 0) {
       this.publishTimer = 0.25;
@@ -691,7 +829,32 @@ export class WorldScene extends Phaser.Scene {
       drops: this.sim.drops.length,
       torches: this.torches.count,
       presses: this.interaction.presses,
+      hp: this.sim.player.hp,
+      mp: this.sim.player.mp,
+      level: this.sim.player.level,
+      exp: this.sim.player.progress.exp,
+      jobId: this.sim.player.jobId,
+      alive: this.sim.player.alive,
+      monsters: this.sim.monsters.monsters.filter((x) => x.alive).length,
+      monsterSprites: this.combatView.monsters.count,
     };
+  }
+
+  /** Test hook: spawn a monster near the player. */
+  debugSummon(id: string): boolean {
+    return this.sim.devSpawn(id);
+  }
+
+  /** Test hook: live monsters (id, def, position, hp). */
+  debugMonsters(): { id: number; def: string; x: number; y: number; hp: number; alive: boolean }[] {
+    return this.sim.monsters.monsters.map((m) => ({
+      id: m.id,
+      def: m.def.id,
+      x: m.motor.x,
+      y: m.motor.y,
+      hp: m.hp,
+      alive: m.alive,
+    }));
   }
 
   /** Test/debug hook: tile id at a position (read-only). */
@@ -722,6 +885,7 @@ export class WorldScene extends Phaser.Scene {
     this.drops.destroy();
     this.torches.destroy();
     this.lightmap.destroy();
+    this.combatView.destroy();
     this.player.destroy();
   }
 }

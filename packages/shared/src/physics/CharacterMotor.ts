@@ -21,6 +21,12 @@ export interface MotorInput {
   jumpPressed: boolean;
   /** Down is held (drop through platforms, fast fall). */
   down: boolean;
+  /** Run speed multiplier (buffs, slows, attacking). Default 1. */
+  speedMul?: number;
+  /** Jump velocity multiplier. Default 1. */
+  jumpMul?: number;
+  /** Gravity multiplier (air attacks hang, dashes ignore gravity). Default 1. */
+  gravityMul?: number;
 }
 
 export const IDLE_INPUT: Readonly<MotorInput> = {
@@ -159,7 +165,7 @@ export function stepMotor(
   }
 
   // --- Horizontal acceleration ----------------------------------------------------------------
-  const target = moveX * cfg.runSpeed;
+  const target = moveX * cfg.runSpeed * (input.speedMul ?? 1);
   const opposing = moveX !== 0 && s.vx !== 0 && Math.sign(moveX) !== Math.sign(s.vx);
   let accel: number;
   if (s.grounded)
@@ -170,7 +176,7 @@ export function stepMotor(
 
   // --- Jump -----------------------------------------------------------------------------------
   if (s.jumpBufferTimer > 0 && (s.grounded || s.coyoteTimer > 0)) {
-    s.vy = -cfg.jumpVelocity;
+    s.vy = -cfg.jumpVelocity * (input.jumpMul ?? 1);
     s.grounded = false;
     s.groundType = 0;
     s.coyoteTimer = 0;
@@ -185,7 +191,7 @@ export function stepMotor(
 
   // --- Gravity --------------------------------------------------------------------------------
   if (!s.grounded) {
-    let g = cfg.gravity;
+    let g = cfg.gravity * (input.gravityMul ?? 1);
     if (s.vy > 0) g *= cfg.fallGravityMul;
     else if (Math.abs(s.vy) < cfg.apexThreshold && input.jumpHeld) g *= cfg.apexGravityMul;
     s.vy = Math.min(s.vy + g * dt, input.down ? cfg.fastFallSpeed : cfg.maxFallSpeed);

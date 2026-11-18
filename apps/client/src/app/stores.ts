@@ -1,4 +1,4 @@
-import type { BaseStats, ItemStack } from '@world/shared';
+import type { BaseStats, EquipSlotId, ItemStack } from '@world/shared';
 import { createSettingsStore, type Settings } from './settings';
 import { createStore, type Store } from './store';
 
@@ -46,8 +46,74 @@ export interface PlayerState {
   readonly mp: number;
   readonly maxMp: number;
   readonly stats: BaseStats;
+  /** Stats including gear bonuses. */
+  readonly totals: BaseStats;
   readonly statPoints: number;
+  readonly skillPoints: number;
+  readonly skills: Readonly<Record<string, number>>;
+  readonly skillBar: readonly (string | null)[];
+  readonly equipment: Readonly<Record<EquipSlotId, ItemStack | null>>;
+  readonly derived: DerivedView;
   readonly portrait: string | null;
+  /** Bumps whenever progression changes. */
+  readonly version: number;
+}
+
+export interface DerivedView {
+  readonly attack: number;
+  readonly magic: number;
+  readonly defense: number;
+  readonly critRate: number;
+  readonly critDamage: number;
+  readonly moveSpeed: number;
+  readonly attackSpeed: number;
+  readonly hpRegen: number;
+  readonly mpRegen: number;
+}
+
+export interface SkillSlotState {
+  readonly id: string | null;
+  /** Seconds left. */
+  readonly cooldown: number;
+  readonly cooldownMax: number;
+  readonly mpCost: number;
+  readonly usable: boolean;
+}
+
+export interface BuffState {
+  readonly id: string;
+  readonly left: number;
+  readonly total: number;
+  readonly kind: 'buff' | 'debuff';
+}
+
+export interface BossState {
+  readonly id: number;
+  readonly nameKey: string;
+  readonly level: number;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly phase: number;
+}
+
+export interface CombatState {
+  readonly skillBar: readonly SkillSlotState[];
+  /** 0..1 of the dodge cooldown remaining. */
+  readonly dodge: number;
+  readonly potion: number;
+  readonly potionMax: number;
+  readonly healPotions: number;
+  readonly manaPotions: number;
+  readonly buffs: readonly BuffState[];
+  readonly boss: BossState | null;
+  readonly dead: boolean;
+  readonly respawnIn: number;
+  /** Bow draw 0..1 (0 = not drawing). */
+  readonly charge: number;
+  /** Counters that trigger one-shot UI effects. */
+  readonly hitFlash: number;
+  readonly levelUp: number;
+  readonly lastLevel: number;
 }
 
 export interface WorldState {
@@ -73,7 +139,8 @@ export interface ChatState {
   readonly messages: readonly ChatMessage[];
 }
 
-export type WindowId = 'character' | 'settings' | 'keyGuide' | 'inventory' | 'worldMap';
+export type WindowId =
+  'character' | 'settings' | 'keyGuide' | 'inventory' | 'worldMap' | 'skills' | 'jobAdvance';
 
 export interface UiState {
   readonly windows: readonly WindowId[];
@@ -110,7 +177,10 @@ export interface Stores {
   readonly settings: Store<Settings>;
   readonly inventory: Store<InventoryState>;
   readonly feed: Store<FeedState>;
+  readonly combat: Store<CombatState>;
 }
+
+const ZERO_STATS = { str: 0, dex: 0, int: 0, vit: 0, luk: 0 };
 
 export function createStores(): Stores {
   return {
@@ -133,9 +203,26 @@ export function createStores(): Stores {
       maxHp: 1,
       mp: 1,
       maxMp: 1,
-      stats: { str: 0, dex: 0, int: 0, vit: 0, luk: 0 },
+      stats: ZERO_STATS,
+      totals: ZERO_STATS,
       statPoints: 0,
+      skillPoints: 0,
+      skills: {},
+      skillBar: [null, null, null, null],
+      equipment: { head: null, body: null, feet: null, acc1: null, acc2: null },
+      derived: {
+        attack: 0,
+        magic: 0,
+        defense: 0,
+        critRate: 0,
+        critDamage: 0,
+        moveSpeed: 1,
+        attackSpeed: 1,
+        hpRegen: 0,
+        mpRegen: 0,
+      },
       portrait: null,
+      version: -1,
     }),
     world: createStore<WorldState>({
       timeOfDay: 0,
@@ -172,6 +259,22 @@ export function createStores(): Stores {
     settings: createSettingsStore(),
     inventory: createStore<InventoryState>({ slots: [], cursor: null, selected: 0, version: -1 }),
     feed: createStore<FeedState>({ pickups: [], toast: null }),
+    combat: createStore<CombatState>({
+      skillBar: [],
+      dodge: 0,
+      potion: 0,
+      potionMax: 1,
+      healPotions: 0,
+      manaPotions: 0,
+      buffs: [],
+      boss: null,
+      dead: false,
+      respawnIn: 0,
+      charge: 0,
+      hitFlash: 0,
+      levelUp: 0,
+      lastLevel: 1,
+    }),
   };
 }
 

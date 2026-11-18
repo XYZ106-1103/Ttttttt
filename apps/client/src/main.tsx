@@ -65,6 +65,8 @@ async function bootstrap(): Promise<void> {
     debugTile(tx: number, ty: number): number;
     debugCount(itemId: string): number;
     debugFlushSave(): Promise<void>;
+    debugSummon(id: string): boolean;
+    debugMonsters(): unknown;
   }
   const scene = (): Partial<WorldDebug> | null =>
     game.scene.getScene('World') as unknown as Partial<WorldDebug> | null;
@@ -73,7 +75,11 @@ async function bootstrap(): Promise<void> {
     tile: (tx: number, ty: number) => scene()?.debugTile?.(tx, ty),
     count: (itemId: string) => scene()?.debugCount?.(itemId),
     flush: () => scene()?.debugFlushSave?.(),
+    monsters: () => scene()?.debugMonsters?.(),
+    // Test-only spawning lives behind the same developer command the chat exposes (/summon).
+    summon: (id: string) => scene()?.debugSummon?.(id),
     stores,
+    bridge,
   };
   // Development builds only: full access for debugging from the console. Never in production.
   if (import.meta.env.DEV) (window as unknown as { __PW_GAME__: unknown }).__PW_GAME__ = game;

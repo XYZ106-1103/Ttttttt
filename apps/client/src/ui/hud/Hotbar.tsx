@@ -4,6 +4,7 @@ import { t } from '../../i18n';
 import { ItemIcon } from '../components/ItemIcon';
 import { useServices } from '../context';
 import { useStore } from '../hooks/useStore';
+import { SkillBar } from './SkillBar';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
 
@@ -24,19 +25,22 @@ export function Hotbar() {
           {shownName.name}
         </div>
       ) : null}
-      <div className="pw-quickslots pw-panel" data-testid="hotbar">
-        {Array.from({ length: HOTBAR_SIZE }, (_, i) => (
-          <button
-            key={i}
-            type="button"
-            className={`pw-slot ${i === selected ? 'is-selected' : ''}`}
-            onClick={() => bridge.selectSlot(i)}
-            data-testid={`hotbar-${i}`}
-          >
-            <span className="pw-slot__key">{KEYS[i]}</span>
-            <ItemIcon stack={slots[i] ?? null} />
-          </button>
-        ))}
+      <div className="pw-hotbar-row">
+        <div className="pw-quickslots pw-panel" data-testid="hotbar">
+          {Array.from({ length: HOTBAR_SIZE }, (_, i) => (
+            <button
+              key={i}
+              type="button"
+              className={`pw-slot ${i === selected ? 'is-selected' : ''}`}
+              onClick={() => bridge.selectSlot(i)}
+              data-testid={`hotbar-${i}`}
+            >
+              <span className="pw-slot__key">{KEYS[i]}</span>
+              <ItemIcon stack={slots[i] ?? null} />
+            </button>
+          ))}
+        </div>
+        <SkillBar />
       </div>
     </div>
   );

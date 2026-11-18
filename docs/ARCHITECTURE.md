@@ -24,7 +24,10 @@ packages/shared/src
 ├── math/                   rng(해시·sfc32), noise(value/gradient/fBm/주기형), scalar
 ├── data/                   tiles, objects, movement, classes(직업), regions
 ├── entities/stats.ts       STR/DEX/INT/VIT/LUK, 파생 능력치, 경험치 곡선, 레벨업
-├── sandbox/                ItemRegistry, Inventory(커서 스택), crafting, interaction(채굴·설치·벌목·채집 규칙)
+├── sandbox/                ItemRegistry, Inventory(커서 스택), Equipment, crafting, interaction(채굴·설치·벌목·채집)
+├── combat/                 actions(행동 타임라인 데이터 모델), CombatWorld(히트 윈도·투사체·장판·피해 판정),
+│                           ActorCombat(콤보·공중·차징·스킬·회피 상태 기계), damage, stats, status, shapes, progression
+├── monsters/               Monster, brains(슬라임·딱정벌레·박쥐·도깨비불 FSM), golem(보스), spawning, MonsterManager
 ├── time/WorldClock.ts      시간대·낮밤·일차
 ├── world/
 │   ├── Chunk.ts            32×32 타일, fg/bg Uint16Array, version/modified 플래그
@@ -106,15 +109,39 @@ apps/client/src
 - **입력**: 마우스 클릭은 다음 시뮬레이션 틱이 소비할 때까지 버퍼링되고, 도구 쿨다운 중의 클릭도
   최대 0.35초(시뮬레이션 시간) 대기해 손실되지 않음.
 
-## 5. 저장 (PHASE 2: 브라우저 IndexedDB)
+## 5. 전투·RPG (PHASE 3)
+
+모든 전투 규칙은 `packages/shared`에 있고 엔진·렌더링과 무관합니다(PHASE 6 서버에서 그대로 실행).
+
+- **행동 = 데이터**: 기본 공격·스킬·몬스터 공격 모두 `ActionDef` 타임라인(`hit`·`projectile`·`dash`·
+  `teleport`·`buff`·`zone` 이벤트)입니다. 새 스킬은 대부분 `data/skills.ts`에 데이터만 추가하면 됩니다.
+  레벨별 수치는 `[기본값, 레벨당 증가]` 쌍(`scaled()`), 공격 속도는 타임라인 시간을 나눕니다.
+- **ActorCombat**: 입력 의도(`CombatIntent`: 공격 누름/유지, 조준점, 스킬, 회피)를 받아 콤보 창·캔슬 지점·
+  입력 버퍼·차징·대시를 처리하고 모터에 이동 보정(`MotorOverride`)을 돌려줍니다. 플레이어와 PHASE 4 AI
+  모험가가 같은 클래스를 씁니다(AI는 두뇌가 의도를 만듦).
+- **CombatWorld**: 히트 윈도(소유자를 따라다니는 판정 영역, 대상별 1회 또는 간격 재타격), 투사체(중력·유도·
+  관통·폭발·지면 이동), 장판, 상태 이상 틱. 피해 공식: `공격력 × 배율 × (0.9~1.1) × 100/(100+방어) ×
+레벨 차 보정 × 받는 피해 × 약점 배율 × (치명 시 1+치명 피해)`. 결과는 이벤트로만 나가고 렌더러는 읽기만 합니다.
+- **능력치**: `computeCombatStats(성장치, 직업, 무기, 장비 보너스, 패시브+버프 수정치)` — 무기 종류가 주/보조
+  스탯을 정합니다(검 STR/DEX, 활 DEX/STR, 단검 LUK/DEX, 지팡이 INT/LUK).
+- **몬스터 AI**: 행동 FSM(외부 AI 서비스 없음). 모든 위험한 공격은 예고(telegraph) → 실행 → 회복(약점) 구조라
+  조작 타이밍으로 대응할 수 있습니다. 보스는 거리 기반 패턴 선택, 체력 50% 이하 격노.
+- **생성 규칙**: 플레이어 주변 26~46칸 링(화면 밖), 지역(지표/지하/심층)·시간대별 가중치, 시작의 언덕(±34칸)과
+  횃불 7칸 이내 제외, 지역별 상한, 80칸 밖 6초 후 소멸.
+- **클라이언트 표현**: `CombatPresenter`가 시뮬레이션 이벤트를 받아 몬스터/투사체 스프라이트, 무기 궤적(히트
+  윈도 타이밍에 맞춰 예약), 데미지 숫자, hitstop, 흔들림, 잔상, 레벨업 연출, HUD 스토어를 갱신합니다.
+
+## 6. 저장 (브라우저 IndexedDB)
 
 - `SaveStore` 인터페이스(IndexedDB 구현 + 메모리 대체). PHASE 6에서 서버 구현으로 교체.
 - 월드: **수정된 청크만** RLE로 저장(`World.collectDirty()` 증분 저장, 5초 자동 저장 + 탭 숨김/닫힘 시 즉시).
   수정 안 된 청크는 시드로 재생성. 플레이어: 위치·인벤토리·선택 슬롯·탐험한 청크(월드맵)·플레이 시간.
 - 메모리: 화면에서 6청크 이상 떨어진 청크 데이터는 언로드(수정된 것은 직렬화 상태로 보관 후 필요 시 복원).
-- 형식 버전 필드(`CHUNK_FORMAT_VERSION`, `SAVE_VERSION`)로 이후 마이그레이션에 대비.
+- 형식 버전 필드(`CHUNK_FORMAT_VERSION`, `SAVE_VERSION`)로 마이그레이션. v2(PHASE 3)는 레벨·직업·스킬·
+  단축키·장비·HP/MP를 저장하고, v1 세이브는 기본값 + 시작 무기·물약 지급으로 이전합니다. 불러올 때 모든 값을
+  검증(모르는 스킬·아이템 제거, 레벨·수치 범위 제한)합니다.
 
-## 6. 이동·물리 (CharacterMotor)
+## 7. 이동·물리 (CharacterMotor)
 
 `stepMotor(state, input, grid, config, dt)` — 순수 함수, 고정 스텝.
 
@@ -127,7 +154,7 @@ apps/client/src
 
 튜닝 값은 전부 `data/movement.ts`에 있으며 단위 테스트가 점프 높이·코요테·버퍼·스텝·발판·결정론을 검증합니다.
 
-## 7. 절차적 픽셀 아트 파이프라인
+## 8. 절차적 픽셀 아트 파이프라인
 
 모든 생성기는 DOM 없는 `PixelCanvas`(Uint32 RGBA)에 그리므로 테스트·오프라인 미리보기(`art:preview`)가 가능합니다.
 
@@ -145,20 +172,25 @@ apps/client/src
 - **배경**: 주기형 노이즈로 가로 타일링되는 원경 설산·중경 산·원경 숲·근경 숲, Bayer 디더 대기 원근,
   구름·해·달·별.
 - **색**: 색조 이동(hue-shift) 셰이딩 — 그림자는 청보라, 하이라이트는 노랑 쪽으로.
+- **몬스터·전투 아트(PHASE 3)**: 법선 재구성 볼륨 셰이딩(`shadedBlob`, 초타원·면 분할로 바위/갑옷 질감),
+  선택적 외곽선(sel-out). 슬라임(스쿼시·스트레치), 딱정벌레(6다리 보행), 박쥐(날갯짓), 도깨비불(발광, 조명 기여),
+  골렘(96px 보스). 무기·방어구·물약·재료 아이콘, 스킬·상태 아이콘(24/16px), 투사체·궤적·타격·폭발·서리·
+  빛기둥·데미지 숫자 글리프. 손그림 교체 규약: 몬스터 프레임 `${monsterId}:${anim}_${i}`(텍스처 `monsters`).
 
 손그림 교체: 같은 텍스처 키와 프레임 이름(`run_0`…, `tree_oak_0_0`…, 타일 프레임 인덱스 규약)으로
 아틀라스를 `BootScene.preload()`에서 로드하고 해당 생성 단계를 건너뛰면 됩니다.
 
-## 8. UI
+## 9. UI
 
 React 19 + 순수 CSS 디자인 시스템(토큰: `ui/styles/index.css`). Galmuri 픽셀 폰트(OFL).
-상태 표시(초상화는 캐릭터 스프라이트에서 자동 생성), HP/MP/EXP, 미니맵(실제 월드 데이터, 3Hz),
+상태 표시(초상화는 캐릭터 스프라이트에서 자동 생성), HP/MP/EXP, 스킬 바·버프 바·보스 바·사망 화면,
+캐릭터(스탯 분배·전직)·스킬·전직·인벤토리(장비 칸) 창, 미니맵(실제 월드 데이터, 3Hz),
 시계/일차, 지역 배너, 채팅(로컬)·시스템 로그·개발 명령, 퀵슬롯, 메뉴 바, 드래그 가능한 창
 (캐릭터 정보·설정·조작법), 일시정지 메뉴, 로딩/타이틀/오류 화면. 단축키는 `InputManager.onUiAction`.
 
 > 메뉴를 열어도 월드는 멈추지 않습니다 — 영속 온라인 월드를 전제로 한 설계입니다(입력만 차단).
 
-## 9. 향후 구조 (계획 — 아직 구현되지 않음)
+## 10. 향후 구조 (계획 — 아직 구현되지 않음)
 
 ```
 apps/server (PHASE 6)     Node.js + TypeScript + WebSocket 게이트웨이, 존(zone) 시뮬레이션 프로세스

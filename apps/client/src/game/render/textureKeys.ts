@@ -14,7 +14,17 @@ export const TEX = {
   stars: 'sky_stars',
   sky: 'sky_gradient',
   lightmap: 'lightmap',
+  monsters: 'monsters',
+  combat: 'combat_fx',
 } as const;
+
+export function monsterAnimKey(id: string, anim: string): string {
+  return `mon:${id}:${anim}`;
+}
+
+export function combatAnimKey(name: string): string {
+  return `cfx:${name}`;
+}
 
 export const CLOUD_VARIANTS = 4;
 

@@ -1,4 +1,7 @@
+import { BossBar } from './BossBar';
+import { BuffBar } from './BuffBar';
 import { ChatBox } from './ChatBox';
+import { CombatOverlay } from './CombatOverlay';
 import { DebugOverlay } from './DebugOverlay';
 import { ExpBar } from './ExpBar';
 import { MenuBar } from './MenuBar';
@@ -11,7 +14,10 @@ import { StatusPanel } from './StatusPanel';
 export function Hud() {
   return (
     <div className="pw-hud" data-testid="hud">
+      <CombatOverlay />
       <StatusPanel />
+      <BuffBar />
+      <BossBar />
       <Minimap />
       <RegionBanner />
       <ChatBox />

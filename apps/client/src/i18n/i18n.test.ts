@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { JOB_DEFS, OBJECT_DEFS, REGION_DEFS, TILE_DEFS, ZONE_NAME_KEY } from '@world/shared';
+import {
+  ITEM_DEFS,
+  JOB_DEFS,
+  MONSTER_DEFS,
+  OBJECT_DEFS,
+  REGION_DEFS,
+  SKILL_DEFS,
+  STATUS_DEFS,
+  TILE_DEFS,
+  ZONE_NAME_KEY,
+} from '@world/shared';
 import { en } from './en';
 import { setLanguage, t } from './index';
 import { ko } from './ko';
@@ -15,6 +25,10 @@ describe('i18n', () => {
       ...OBJECT_DEFS.map((d) => d.nameKey),
       ...JOB_DEFS.flatMap((d) => [d.nameKey, d.descriptionKey]),
       ...REGION_DEFS.map((d) => d.nameKey),
+      ...ITEM_DEFS.flatMap((d) => [d.nameKey, d.descKey, `itemKind.${d.kind}`]),
+      ...MONSTER_DEFS.map((d) => d.nameKey),
+      ...SKILL_DEFS.flatMap((d) => [d.nameKey, d.descKey, `skillType.${d.type}`]),
+      ...STATUS_DEFS.map((d) => d.nameKey),
       ZONE_NAME_KEY,
     ];
     for (const k of keys) expect(k in ko, k).toBe(true);

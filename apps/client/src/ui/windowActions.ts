@@ -17,3 +17,8 @@ export function focusWindow(stores: Stores, id: WindowId): void {
       : { windows: [...u.windows.filter((w) => w !== id), id] },
   );
 }
+
+/** Open (or bring to front) a window. */
+export function openWindow(stores: Stores, id: WindowId): void {
+  stores.ui.set((u) => ({ windows: [...u.windows.filter((w) => w !== id), id] }));
+}

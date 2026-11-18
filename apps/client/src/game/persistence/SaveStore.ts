@@ -1,6 +1,7 @@
-import type { InventoryData, SerializedChunk } from '@world/shared';
+import type { BaseStats, EquipmentData, InventoryData, SerializedChunk } from '@world/shared';
 
-export const SAVE_VERSION = 1;
+/** v2 (PHASE 3) adds progression, job, skills and equipment; v1 saves load with defaults. */
+export const SAVE_VERSION = 2;
 
 export interface WorldMeta {
   readonly v: number;
@@ -20,6 +21,18 @@ export interface PlayerSave {
   /** Chunk indices the player has seen (world map fog of war). */
   readonly explored: readonly number[];
   readonly playTime: number;
+  // --- v2 ---
+  readonly level?: number;
+  readonly exp?: number;
+  readonly jobId?: string;
+  readonly stats?: BaseStats;
+  readonly statPoints?: number;
+  readonly skillPoints?: number;
+  readonly skills?: Readonly<Record<string, number>>;
+  readonly skillBar?: readonly (string | null)[];
+  readonly equipment?: EquipmentData;
+  readonly hp?: number;
+  readonly mp?: number;
 }
 
 export interface SaveBundle {

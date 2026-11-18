@@ -196,6 +196,24 @@ export class Inventory {
     return true;
   }
 
+  /** Replace the cursor stack, returning the previous one (equipment slots use this). */
+  swapCursor(stack: ItemStack | null): ItemStack | null {
+    const prev = this.cursorStack;
+    this.cursorStack = stack && this.items.has(stack.itemId) ? stack : null;
+    this.touch();
+    return prev;
+  }
+
+  /** Overwrite one slot (validated). Used by equipment swaps. */
+  replaceAt(index: number, stack: ItemStack | null): void {
+    if (!this.validIndex(index)) return;
+    this.slots[index] =
+      stack && this.items.has(stack.itemId) && stack.count > 0
+        ? { itemId: stack.itemId, count: Math.min(stack.count, this.items.maxStack(stack.itemId)) }
+        : null;
+    this.touch();
+  }
+
   /** Put the cursor stack back into the inventory. Returns what did not fit (to drop in world). */
   returnCursor(): ItemStack | null {
     const cur = this.cursorStack;

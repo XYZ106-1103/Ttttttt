@@ -1,6 +1,7 @@
 import { ITEM_DEFS, tileRegistry } from '@world/shared';
 import { type Color, hex, mix, shade } from '../color';
 import { generateFlower, generateMushroom } from '../objects/flora';
+import { gearIcon } from './gearIcons';
 import { PixelCanvas } from '../PixelCanvas';
 import { SpriteAtlasBuilder, type SpriteAtlas } from '../SpriteAtlas';
 import {
@@ -154,7 +155,9 @@ export function generateItemIcons(ts: Tileset): Map<string, PixelCanvas> {
   for (const def of ITEM_DEFS) {
     let icon: PixelCanvas;
     const metalKey = def.id.split('_')[0] ?? '';
-    if (def.tool) {
+    const gear = gearIcon(def);
+    if (gear) icon = gear;
+    else if (def.tool) {
       const metal = METALS[metalKey] ?? METALS.worn ?? [];
       icon = def.tool.type === 'pickaxe' ? pickaxe(metal) : axe(metal);
     } else if (def.id === 'torch') {

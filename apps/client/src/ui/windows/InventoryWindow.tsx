@@ -1,4 +1,6 @@
 import {
+  EQUIP_SLOTS,
+  type EquipSlotId,
   HOTBAR_SIZE,
   INVENTORY_SIZE,
   itemRegistry,
@@ -44,6 +46,7 @@ export function InventoryWindow(props: Props) {
   const cursor = useStore(stores.inventory, (s) => s.cursor);
   const selected = useStore(stores.inventory, (s) => s.selected);
   const uiScale = useStore(stores.settings, (s) => s.uiScale);
+  const equipment = useStore(stores.player, (s) => s.equipment);
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
   const [hover, setHover] = useState<ItemStack | null>(null);
 
@@ -74,6 +77,27 @@ export function InventoryWindow(props: Props) {
     } else if (res.reason === 'no_space') showToast(stores, t('use.inventory_full'));
   };
 
+  const equipSlot = (id: EquipSlotId) => {
+    const st = equipment[id];
+    return (
+      <button
+        key={id}
+        type="button"
+        className={`pw-slot pw-slot--equip ${st ? '' : 'is-empty'}`}
+        onClick={() => {
+          const fail = bridge.clickEquipment(id);
+          if (fail && fail !== 'invalid') showToast(stores, t(`equip.${fail}`));
+        }}
+        onPointerEnter={() => setHover(st)}
+        onPointerLeave={() => setHover(null)}
+        title={t(`equipSlot.${id}`)}
+        data-testid={`equip-${id}`}
+      >
+        {st ? <ItemIcon stack={st} /> : <span className="pw-slot__ph">{t(`equipSlot.${id}`)}</span>}
+      </button>
+    );
+  };
+
   const slot = (i: number) => {
     const s = slots[i] ?? null;
     return (
@@ -99,12 +123,16 @@ export function InventoryWindow(props: Props) {
   return (
     <Window
       title={t('window.inventory')}
-      width={720}
-      initial={{ x: Math.max(16, window.innerWidth / 2 - 360), y: 110 }}
+      width={790}
+      initial={{ x: Math.max(16, window.innerWidth / 2 - 395), y: 110 }}
       testId="window-inventory"
       {...props}
     >
       <div className="pw-inv">
+        <div className="pw-inv__equip">
+          <div className="pw-inv__label">{t('inv.equipment')}</div>
+          {EQUIP_SLOTS.map((id) => equipSlot(id))}
+        </div>
         <div className="pw-inv__left">
           <div className="pw-inv__label">{t('inv.hotbar')}</div>
           <div className="pw-inv__grid">

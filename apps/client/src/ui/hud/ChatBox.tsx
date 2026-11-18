@@ -82,6 +82,48 @@ export function ChatBox() {
       case 'seed':
         pushChat(stores, 'system', t('chat.seed', { seed: stores.world.get().seed }));
         break;
+      // --- Developer commands (single player testing; PHASE 6 restricts to admins) ---------
+      case 'level': {
+        const n = Number(args[0]);
+        if (!Number.isInteger(n) || n < 1 || n > 200) {
+          pushChat(stores, 'system', t('chat.levelUsage'));
+          break;
+        }
+        bridge.devLevel(n);
+        pushChat(stores, 'system', t('chat.levelSet', { level: n }));
+        break;
+      }
+      case 'summon': {
+        const id = args[0] ?? '';
+        pushChat(
+          stores,
+          'system',
+          bridge.devSummon(id) ? t('chat.summoned', { id }) : t('chat.summonUsage'),
+        );
+        break;
+      }
+      case 'give': {
+        const id = args[0] ?? '';
+        const n = Number(args[1] ?? 1);
+        pushChat(
+          stores,
+          'system',
+          bridge.devGive(id, Number.isFinite(n) ? n : 1)
+            ? t('chat.given', { id, count: n })
+            : t('chat.giveUsage'),
+        );
+        break;
+      }
+      case 'heal':
+        bridge.devHeal();
+        break;
+      case 'peace':
+      case 'monsters': {
+        const on = (cmd ?? '').toLowerCase() === 'monsters';
+        bridge.setMonsters(on);
+        pushChat(stores, 'system', t(on ? 'chat.monstersOn' : 'chat.monstersOff'));
+        break;
+      }
       default:
         pushChat(stores, 'system', t('chat.unknown'));
     }

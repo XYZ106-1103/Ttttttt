@@ -70,3 +70,192 @@ describe('GameSimulation sandbox loop', () => {
     expect(sim.player.inventory.count('worn_pickaxe')).toBe(1);
   });
 });
+
+describe('GameSimulation combat loop', () => {
+  const swordSlot = (sim: GameSimulation) =>
+    [...Array(10).keys()].find((i) => sim.player.inventory.get(i)?.itemId === 'training_sword') ??
+    -1;
+
+  function fight(sim: GameSimulation, seconds: number, aimAt: () => { x: number; y: number }) {
+    for (let i = 0; i < Math.round(seconds / SIM_DT); i++) {
+      const a = aimAt();
+      sim.tick(SIM_DT, IDLE_INPUT, null, {
+        attackPressed: i % 6 === 0,
+        attackHeld: true,
+        aimX: a.x,
+        aimY: a.y,
+        skillSlot: null,
+        dodge: false,
+        quickHeal: false,
+        quickMana: false,
+      });
+    }
+  }
+
+  it('kills a monster with the starter sword for experience and loot', () => {
+    const sim = make();
+    sim.monstersEnabled = false;
+    settle(sim, 0.5);
+    sim.selectSlot(swordSlot(sim));
+    expect(sim.heldMode()).toBe('weapon');
+    expect(sim.devSpawn('dew_slime')).toBe(true);
+    const slime = sim.monsters.monsters[0];
+    expect(slime).toBeDefined();
+    if (!slime) return;
+    slime.motor.x = sim.player.motor.x + 24;
+    slime.motor.y = sim.player.motor.y;
+    slime.hp = 10;
+    fight(sim, 2, () => ({ x: slime.motor.x, y: slime.motor.y - 6 }));
+    expect(slime.alive).toBe(false);
+    expect(sim.player.progress.exp + (sim.player.level - 1) * 1000).toBeGreaterThan(0);
+    expect(sim.events.exp.length).toBe(1);
+    expect(sim.events.combat.some((e) => e.type === 'damage' && e.targetId === slime.id)).toBe(
+      true,
+    );
+  });
+
+  it('levels up with full heal and points, advances jobs and casts skills', () => {
+    const sim = make();
+    sim.monstersEnabled = false;
+    settle(sim, 0.3);
+    sim.player.hp = 5;
+    sim.devSetLevel(10);
+    expect(sim.player.level).toBe(10);
+    expect(sim.player.hp).toBe(sim.player.stats.maxHp);
+    expect(sim.player.progress.statPoints).toBe(45);
+    expect(sim.advanceJob('nope')).toBe(false);
+    expect(sim.advanceJob('warrior')).toBe(true);
+    expect(sim.player.inventory.count('copper_sword')).toBe(1);
+    expect(sim.learnSkill('warrior_power_strike')).toBeNull();
+    sim.setSkillSlot(0, 'warrior_power_strike');
+    const mp = sim.player.mp;
+    sim.tick(SIM_DT, IDLE_INPUT, null, { ...idle(), skillSlot: 0 });
+    // The skill auto-swapped to a sword from the hotbar and spent MP.
+    expect(sim.heldMode()).toBe('weapon');
+    expect(sim.player.mp).toBeLessThan(mp);
+    expect(
+      sim.events.actor.some((e) => e.type === 'action' && e.skill === 'warrior_power_strike'),
+    ).toBe(true);
+  });
+
+  it('skills deal multiplied damage to monsters in their hit shape', () => {
+    const sim = make();
+    sim.monstersEnabled = false;
+    settle(sim, 0.3);
+    sim.devSetLevel(10);
+    sim.advanceJob('warrior');
+    sim.learnSkill('warrior_power_strike');
+    sim.setSkillSlot(0, 'warrior_power_strike');
+    expect(sim.devSpawn('dew_slime')).toBe(true);
+    const m = sim.monsters.monsters[0];
+    if (!m) return;
+    m.hp = 5000;
+    m.stats = { ...m.stats, maxHp: 5000 };
+    m.motor.x = sim.player.motor.x + 26;
+    m.motor.y = sim.player.motor.y;
+    m.motor.vx = 0;
+    const aim = { aimX: m.motor.x, aimY: m.motor.y - 6 };
+    sim.tick(SIM_DT, IDLE_INPUT, null, { ...idle(), ...aim, skillSlot: 0 });
+    for (let i = 0; i < 40; i++) sim.tick(SIM_DT, IDLE_INPUT, null, { ...idle(), ...aim });
+    const hits = sim.events.combat.filter((e) => e.type === 'damage' && e.targetId === m.id);
+    expect(hits.length).toBe(1);
+    const dmg = hits[0]?.type === 'damage' ? hits[0].amount : 0;
+    // 230% of attack (± variance, crits allowed).
+    expect(dmg).toBeGreaterThan(sim.player.stats.attack * 2.3 * 0.85);
+  });
+
+  it('monsters hurt the player (the first spawned monster never shares the player id)', () => {
+    const sim = make();
+    sim.monstersEnabled = false;
+    settle(sim, 0.3);
+    expect(sim.devSpawn('corestone_golem')).toBe(true);
+    const boss = sim.monsters.monsters[0];
+    expect(boss?.id).not.toBe(sim.player.id);
+    expect(sim.combat.combatants.get(sim.player.id)).toBe(sim.player);
+    settle(sim, 12);
+    expect(sim.events.combat.some((e) => e.type === 'damage' && e.targetId === sim.player.id)).toBe(
+      true,
+    );
+    expect(sim.player.hp < sim.player.stats.maxHp || !sim.player.alive).toBe(true);
+  });
+
+  it('dies, loses a little experience and respawns after the timer', () => {
+    const sim = make();
+    sim.monstersEnabled = false;
+    settle(sim, 0.3);
+    sim.devSetLevel(3);
+    sim.player.gainExp(50);
+    const exp = sim.player.progress.exp;
+    sim.combat.kill(sim.player, -1);
+    settle(sim, SIM_DT * 2);
+    expect(sim.player.alive).toBe(false);
+    expect(sim.player.progress.exp).toBeLessThan(exp);
+    expect(sim.requestRespawn()).toBe(false);
+    settle(sim, 5.1);
+    expect(sim.requestRespawn()).toBe(true);
+    expect(sim.player.alive).toBe(true);
+    expect(sim.player.hp).toBe(sim.player.stats.maxHp);
+  });
+
+  it('drinks potions with a shared cooldown', () => {
+    const sim = make();
+    settle(sim, 0.3);
+    sim.player.hp = 20;
+    expect(sim.quickUse('heal')).toBe(true);
+    expect(sim.player.hp).toBeGreaterThan(90);
+    expect(sim.player.inventory.count('healing_potion')).toBe(4);
+    expect(sim.quickUse('heal')).toBe(false);
+    expect(
+      sim.events.notices.some((n) => n.kind === 'consumeFail' && n.reason === 'cooldown'),
+    ).toBe(true);
+  });
+
+  it('saves progression, skills and equipment; migrates v1 saves with the starter weapon', async () => {
+    const store = new MemorySaveStore(true);
+    const sim = make();
+    sim.monstersEnabled = false;
+    settle(sim, 0.3);
+    sim.devSetLevel(12);
+    sim.advanceJob('archer');
+    sim.learnSkill('archer_double_shot');
+    sim.setSkillSlot(1, 'archer_double_shot');
+    sim.player.inventory.add('traveler_hood', 1);
+    const idx =
+      [...Array(40).keys()].find((i) => sim.player.inventory.get(i)?.itemId === 'traveler_hood') ??
+      -1;
+    expect(sim.player.equipFromInventory(idx)).toBeNull();
+    await store.saveState('test', sim.exportMeta(SEED), sim.exportPlayer());
+    const loaded = make(await store.load('test'));
+    expect(loaded.player.level).toBe(12);
+    expect(loaded.player.jobId).toBe('archer');
+    expect(loaded.player.skills.archer_double_shot).toBe(1);
+    expect(loaded.player.skillBar[1]).toBe('archer_double_shot');
+    expect(loaded.player.equipment.get('head')?.itemId).toBe('traveler_hood');
+
+    const v1 = {
+      ...sim.exportPlayer(),
+      v: 1,
+      level: undefined,
+      jobId: undefined,
+      skills: undefined,
+    };
+    v1.inventory = { slots: [{ itemId: 'worn_pickaxe', count: 1 }], cursor: null };
+    const old = make({ meta: null, player: v1, chunks: [] });
+    expect(old.player.level).toBe(1);
+    expect(old.player.jobId).toBe('novice');
+    expect(old.player.inventory.count('training_sword')).toBe(1);
+  });
+});
+
+function idle() {
+  return {
+    attackPressed: false,
+    attackHeld: false,
+    aimX: 0,
+    aimY: 0,
+    skillSlot: null,
+    dodge: false,
+    quickHeal: false,
+    quickMana: false,
+  };
+}

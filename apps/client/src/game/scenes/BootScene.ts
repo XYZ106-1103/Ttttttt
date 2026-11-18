@@ -5,6 +5,7 @@ import { WORLD_ID } from '../worldConfig';
 import {
   characterPortraitDataUrl,
   ensureCharacterTexture,
+  registerCombat,
   registerFx,
   registerItems,
   registerObjects,
@@ -62,6 +63,7 @@ export class BootScene extends Phaser.Scene {
               Object.assign(this.services.icons, registerItems(this, assets.tileset));
           },
         ],
+        ['boot.monsters', () => Object.assign(this.services.icons, registerCombat(this))],
       ];
       for (let i = 0; i < steps.length; i++) {
         const [label, run] = steps[i] as [string, () => void];

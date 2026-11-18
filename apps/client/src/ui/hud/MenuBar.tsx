@@ -28,8 +28,8 @@ const ENTRIES: readonly MenuEntry[] = [
     window: 'inventory',
     action: 'inventory',
   },
-  { id: 'skills', labelKey: 'hud.skills', icon: '✦', lockedPhase: 'PHASE 3', action: 'skills' },
-  { id: 'quests', labelKey: 'hud.quests', icon: '❖', lockedPhase: 'PHASE 3', action: 'quests' },
+  { id: 'skills', labelKey: 'hud.skills', icon: '✦', window: 'skills', action: 'skills' },
+  { id: 'quests', labelKey: 'hud.quests', icon: '❖', lockedPhase: 'PHASE 5', action: 'quests' },
   {
     id: 'worldMap',
     labelKey: 'hud.worldMap',

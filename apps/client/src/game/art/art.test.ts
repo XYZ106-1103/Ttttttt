@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { OBJECT_DEFS, tileRegistry } from '@world/shared';
+import {
+  MONSTER_DEFS,
+  OBJECT_DEFS,
+  PROJECTILE_DEFS,
+  SKILL_DEFS,
+  STATUS_DEFS,
+  tileRegistry,
+} from '@world/shared';
+import { DIGIT_CHARS, DIGIT_STYLES, digitFrame, generateCombatFxAtlas } from './fx/CombatFxArt';
+import { generateSkillIcons, generateStatusIcons } from './icons/SkillIcons';
+import { generateMonsterSheets } from './monsters/MonsterArt';
 import { APPEARANCE_PRESETS, PLAYER_APPEARANCE, randomAppearance } from './character/appearance';
 import { composeCharacterSheet, composePortrait } from './character/CharacterComposer';
-import { ANIMATIONS } from './character/poses';
+import { ANIMATIONS, COMBAT_ANIMATIONS } from './character/poses';
 import { FRAME_SIZE } from './character/rig';
 import { generateObjectAtlas, objectFrameCount, objectFrameName } from './objects/ObjectArt';
 import { PixelCanvas } from './PixelCanvas';
@@ -22,7 +32,7 @@ function frameOpaque(sheet: PixelCanvas, x: number, y: number, w: number, h: num
 describe('CharacterComposer', () => {
   it('produces every animation frame, non-empty and inside the frame', () => {
     const sheet = composeCharacterSheet(PLAYER_APPEARANCE);
-    const expected = ANIMATIONS.reduce((n, a) => n + a.frames.length, 0);
+    const expected = [...ANIMATIONS, ...COMBAT_ANIMATIONS].reduce((n, a) => n + a.frames.length, 0);
     expect(sheet.frames.length).toBe(expected);
     for (const f of sheet.frames) {
       expect(f.w).toBe(FRAME_SIZE);
@@ -105,5 +115,55 @@ describe('ObjectArt', () => {
       expect(f.x + f.w).toBeLessThanOrEqual(atlas.canvas.width);
       expect(f.y + f.h).toBeLessThanOrEqual(atlas.canvas.height);
     }
+  });
+});
+
+describe('combat art', () => {
+  it('has a sprite sheet for every monster with the animations its brain uses', () => {
+    const sheets = generateMonsterSheets();
+    for (const def of MONSTER_DEFS) {
+      const sheet = sheets.get(def.id);
+      expect(sheet, def.id).toBeDefined();
+      if (!sheet) continue;
+      expect(sheet.anims.has('dead'), `${def.id} dead`).toBe(true);
+      expect(sheet.anims.has('hurt') || def.boss, `${def.id} hurt`).toBe(true);
+      for (const [anim, a] of sheet.anims) {
+        expect(a.frames.length, `${def.id}:${anim}`).toBeGreaterThan(0);
+        for (const f of a.frames) {
+          expect(f.width).toBe(sheet.width);
+          if (anim !== 'dead') expect(f.opaqueCount(), `${def.id}:${anim}`).toBeGreaterThan(40);
+        }
+      }
+    }
+  });
+
+  it('packs projectile visuals, effects and damage digits into the combat atlas', () => {
+    const names = new Set(generateCombatFxAtlas().frames.map((f) => f.name));
+    for (const p of PROJECTILE_DEFS) {
+      expect(names.has(p.visual) || names.has(`${p.visual}_0`), p.visual).toBe(true);
+    }
+    for (const style of Object.keys(DIGIT_STYLES))
+      for (const ch of DIGIT_CHARS) expect(names.has(digitFrame(style, ch))).toBe(true);
+    for (const n of [
+      'slash_0',
+      'spin_0',
+      'slam_0',
+      'thrust_0',
+      'hit_0',
+      'crit_0',
+      'explode_0',
+      'frost_0',
+      'pillar',
+    ]) {
+      expect(names.has(n), n).toBe(true);
+    }
+  });
+
+  it('draws an icon for every skill and status effect', () => {
+    const skills = generateSkillIcons();
+    for (const s of SKILL_DEFS)
+      expect(skills.get(s.id)?.opaqueCount() ?? 0, s.id).toBeGreaterThan(400);
+    const statuses = generateStatusIcons();
+    for (const s of STATUS_DEFS) expect(statuses.has(s.id), s.id).toBe(true);
   });
 });

@@ -1,7 +1,7 @@
 import { type Color, hex, mix, shade } from '../color';
 import { PixelCanvas } from '../PixelCanvas';
 import type { Appearance, HairStyle } from './appearance';
-import { ANIMATIONS, frameName } from './poses';
+import { ANIMATIONS, COMBAT_ANIMATIONS, frameName } from './poses';
 import { FRAME_SIZE, type AnimationDef, type Pose, RIG } from './rig';
 import {
   capsule,
@@ -914,7 +914,7 @@ export interface CharacterSheet {
 /** Full animated sheet: one row per animation, frames named `${anim}_${i}`. */
 export function composeCharacterSheet(
   a: Appearance,
-  animations: readonly AnimationDef[] = ANIMATIONS,
+  animations: readonly AnimationDef[] = [...ANIMATIONS, ...COMBAT_ANIMATIONS],
   withFrontArm = true,
 ): CharacterSheet {
   const cols = Math.max(...animations.map((x) => x.frames.length));

@@ -153,8 +153,47 @@ import { generateFxAtlas } from '../src/game/art/fx/FxArt';
 if (which === 'all' || which === 'items') {
   const ts = generateTileset(tileRegistry);
   const icons = [...generateItemIcons(ts).values()];
-  const sheet = new PixelCanvas(18 * icons.length, 18);
-  icons.forEach((pc, i) => sheet.blit(pc, i * 18 + 1, 1));
+  const cols = 12;
+  const sheet = new PixelCanvas(18 * cols, 18 * Math.ceil(icons.length / cols));
+  icons.forEach((pc, i) => sheet.blit(pc, (i % cols) * 18 + 1, Math.floor(i / cols) * 18 + 1));
   save('items', sheet, 5, '#2a2f45');
   save('fx', generateFxAtlas().canvas, 5, '#7d9fb4');
+}
+
+import { generateMonsterSheets } from '../src/game/art/monsters/MonsterArt';
+
+if (which === 'all' || which === 'monsters') {
+  for (const [id, sheet] of generateMonsterSheets()) {
+    const anims = [...sheet.anims.entries()];
+    const cols = Math.max(...anims.map(([, a]) => a.frames.length));
+    const pc = new PixelCanvas(sheet.width * cols, sheet.height * anims.length);
+    anims.forEach(([, a], row) =>
+      a.frames.forEach((f, i) => pc.blit(f, i * sheet.width, row * sheet.height)),
+    );
+    save(
+      `monster_${id}`,
+      pc,
+      id === 'corestone_golem' ? 3 : 5,
+      sheet.emissive ? '#101428' : '#6b8aa0',
+    );
+  }
+}
+
+import { generateCombatFxAtlas } from '../src/game/art/fx/CombatFxArt';
+
+if (which === 'all' || which === 'combatfx') {
+  save('combat_fx', generateCombatFxAtlas().canvas, 3, '#3a4258');
+}
+
+import { generateSkillIcons, generateStatusIcons } from '../src/game/art/icons/SkillIcons';
+
+if (which === 'all' || which === 'skills') {
+  const skills = [...generateSkillIcons().values()];
+  const sk = new PixelCanvas(26 * 11, 26 * Math.ceil(skills.length / 11));
+  skills.forEach((pc, i) => sk.blit(pc, (i % 11) * 26 + 1, Math.floor(i / 11) * 26 + 1));
+  save('skill_icons', sk, 4, '#1a1c28');
+  const st = [...generateStatusIcons().values()];
+  const ss = new PixelCanvas(18 * st.length, 18);
+  st.forEach((pc, i) => ss.blit(pc, i * 18 + 1, 1));
+  save('status_icons', ss, 5, '#1a1c28');
 }

@@ -213,6 +213,97 @@ export const ANIMATIONS: readonly AnimationDef[] = [
   },
 ];
 
+// --- Combat poses (PHASE 3) -----------------------------------------------------------------
+
+export const COMBAT_ANIMATIONS: readonly AnimationDef[] = [
+  {
+    key: 'hurt',
+    frames: [
+      pose({
+        bodyY: 2,
+        lean: -3,
+        headY: 1,
+        frontFoot: pt(38, 59),
+        backFoot: pt(27, 59),
+        backToe: 20,
+        frontHand: pt(6, 1),
+        backHand: pt(-7, 2),
+        cloth: 0.7,
+        wave: 2.2,
+        sway: -3,
+        blink: true,
+      }),
+    ],
+    frameRate: 1,
+    repeat: 0,
+  },
+  {
+    key: 'dodge',
+    frames: [
+      pose({
+        bodyY: 6,
+        lean: 6,
+        headY: 1,
+        frontFoot: pt(41, 58),
+        backFoot: pt(23, 58),
+        frontToe: -10,
+        backToe: 45,
+        frontHand: pt(-5, 9),
+        backHand: pt(-9, 7),
+        cloth: 1,
+        wave: 1,
+        sway: 5,
+      }),
+      pose({
+        bodyY: 7,
+        lean: 7,
+        headY: 1,
+        frontFoot: pt(39, 58),
+        backFoot: pt(25, 57),
+        frontToe: -5,
+        backToe: 50,
+        frontHand: pt(-6, 10),
+        backHand: pt(-10, 8),
+        cloth: 1,
+        wave: 2.5,
+        sway: 6,
+      }),
+    ],
+    frameRate: 12,
+    repeat: -1,
+  },
+  {
+    key: 'dead',
+    frames: [
+      pose({
+        bodyY: 6,
+        lean: 3,
+        headY: 2,
+        frontFoot: pt(39, 59),
+        backFoot: pt(27, 59),
+        frontHand: pt(3, 15),
+        backHand: pt(-1, 15),
+        cloth: 0.2,
+        blink: true,
+      }),
+      pose({
+        bodyY: 10,
+        lean: 5,
+        headY: 3,
+        frontFoot: pt(41, 59),
+        backFoot: pt(25, 58),
+        backToe: 60,
+        frontHand: pt(5, 17),
+        backHand: pt(1, 17),
+        cloth: 0.1,
+        blink: true,
+      }),
+    ],
+    frameRate: 8,
+    repeat: 0,
+  },
+];
+
 export function frameName(anim: string, index: number): string {
   return `${anim}_${index}`;
 }

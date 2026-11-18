@@ -18,7 +18,14 @@ import {
 import { FRAME_SIZE } from '../art/character/rig';
 import { hex, withAlpha } from '../art/color';
 import { generateFxAtlas, generateGlow, TORCH_FRAMES } from '../art/fx/FxArt';
+import { generateCombatFxAtlas } from '../art/fx/CombatFxArt';
+import { generateSkillIcons, generateStatusIcons } from '../art/icons/SkillIcons';
 import { generateItemIcons, itemAtlas } from '../art/items/ItemArt';
+import {
+  generateMonsterAtlas,
+  generateMonsterSheets,
+  monsterFrameName,
+} from '../art/monsters/MonsterArt';
 import { generateObjectAtlas, objectFrameCount, objectFrameName } from '../art/objects/ObjectArt';
 import { PixelCanvas } from '../art/PixelCanvas';
 import type { SpriteAtlas } from '../art/SpriteAtlas';
@@ -31,6 +38,8 @@ import {
   characterNoArmKey,
   CLOUD_VARIANTS,
   cloudKey,
+  combatAnimKey,
+  monsterAnimKey,
   objectAnimKey,
   TEX,
 } from './textureKeys';
@@ -194,4 +203,88 @@ export function registerFx(scene: Phaser.Scene): void {
   shadow.fillEllipse(9.5, 2.5, 9.5, 2.6, withAlpha(hex('#000000'), 70));
   shadow.fillEllipse(9.5, 2.5, 6, 1.6, withAlpha(hex('#000000'), 110));
   addCanvasTexture(scene, TEX.shadow, shadow);
+}
+
+/** Layout of one monster's frames (anchor and size) for the renderer. */
+export interface MonsterSheetInfo {
+  readonly width: number;
+  readonly height: number;
+  readonly footX: number;
+  readonly footY: number;
+  readonly emissive: boolean;
+  readonly anims: ReadonlySet<string>;
+}
+
+const monsterInfo = new Map<string, MonsterSheetInfo>();
+
+export function monsterSheetInfo(id: string): MonsterSheetInfo | undefined {
+  return monsterInfo.get(id);
+}
+
+/** Animated combat effects: frame prefix, frame count, rate, repeat. */
+const COMBAT_ANIMS: readonly [string, number, number, number][] = [
+  ['magic_bolt', 3, 14, -1],
+  ['arcane_bolt', 3, 14, -1],
+  ['fireball', 4, 14, -1],
+  ['wisp_fire', 4, 12, -1],
+  ['shockwave', 3, 14, -1],
+  ['slash', 3, 30, 0],
+  ['slam', 3, 22, 0],
+  ['spin', 3, 24, 0],
+  ['thrust', 2, 24, 0],
+  ['hit', 4, 30, 0],
+  ['crit', 4, 24, 0],
+  ['ring', 4, 18, 0],
+  ['frost', 4, 14, 0],
+  ['explode', 5, 18, 0],
+  ['marker', 2, 8, -1],
+];
+
+/**
+ * Monster sprites, combat effects and skill/status icons. Returns data-URL icons for the UI,
+ * keyed `skill:<id>` and `status:<id>`.
+ */
+export function registerCombat(scene: Phaser.Scene): Record<string, string> {
+  const sheets = generateMonsterSheets();
+  addAtlas(scene, TEX.monsters, generateMonsterAtlas(sheets));
+  for (const [id, sheet] of sheets) {
+    for (const [anim, a] of sheet.anims) {
+      const key = monsterAnimKey(id, anim);
+      if (scene.anims.exists(key)) scene.anims.remove(key);
+      scene.anims.create({
+        key,
+        frames: a.frames.map((_, i) => ({
+          key: TEX.monsters,
+          frame: monsterFrameName(id, anim, i),
+        })),
+        frameRate: a.rate,
+        repeat: a.repeat,
+      });
+    }
+    monsterInfo.set(id, {
+      width: sheet.width,
+      height: sheet.height,
+      footX: sheet.footX,
+      footY: sheet.footY,
+      emissive: sheet.emissive ?? false,
+      anims: new Set(sheet.anims.keys()),
+    });
+  }
+  addAtlas(scene, TEX.combat, generateCombatFxAtlas());
+  for (const [name, count, rate, repeat] of COMBAT_ANIMS) {
+    const key = combatAnimKey(name);
+    if (scene.anims.exists(key)) continue;
+    scene.anims.create({
+      key,
+      frames: Array.from({ length: count }, (_, i) => ({ key: TEX.combat, frame: `${name}_${i}` })),
+      frameRate: rate,
+      repeat,
+    });
+  }
+  const urls: Record<string, string> = {};
+  for (const [id, pc] of generateSkillIcons())
+    urls[`skill:${id}`] = toHtmlCanvas(pc).toDataURL('image/png');
+  for (const [id, pc] of generateStatusIcons())
+    urls[`status:${id}`] = toHtmlCanvas(pc).toDataURL('image/png');
+  return urls;
 }

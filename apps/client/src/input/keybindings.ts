@@ -2,7 +2,19 @@
  * Input actions and their default key bindings (KeyboardEvent.code, so they are layout- and
  * IME-independent — Korean IME input does not affect game controls).
  */
-export type GameplayAction = 'moveLeft' | 'moveRight' | 'jump' | 'down' | 'up';
+export type GameplayAction =
+  | 'moveLeft'
+  | 'moveRight'
+  | 'jump'
+  | 'down'
+  | 'up'
+  | 'dodge'
+  | 'skill1'
+  | 'skill2'
+  | 'skill3'
+  | 'skill4'
+  | 'quickHeal'
+  | 'quickMana';
 export type UiAction =
   | 'chat'
   | 'menu'
@@ -31,7 +43,17 @@ export const GAMEPLAY_ACTIONS: readonly GameplayAction[] = [
   'jump',
   'down',
   'up',
+  'dodge',
+  'skill1',
+  'skill2',
+  'skill3',
+  'skill4',
+  'quickHeal',
+  'quickMana',
 ];
+
+/** Skill bar slot → action (Q, E, R, F by default). */
+export const SKILL_ACTIONS = ['skill1', 'skill2', 'skill3', 'skill4'] as const;
 
 export type Bindings = Readonly<Record<Action, readonly string[]>>;
 
@@ -41,6 +63,13 @@ export const DEFAULT_BINDINGS: Bindings = {
   jump: ['Space', 'KeyX'],
   down: ['KeyS', 'ArrowDown'],
   up: ['KeyW', 'ArrowUp'],
+  dodge: ['ShiftLeft', 'ShiftRight'],
+  skill1: ['KeyQ'],
+  skill2: ['KeyE'],
+  skill3: ['KeyR'],
+  skill4: ['KeyF'],
+  quickHeal: ['KeyH'],
+  quickMana: ['KeyJ'],
   chat: ['Enter', 'NumpadEnter'],
   menu: ['Escape'],
   character: ['KeyC'],
@@ -68,6 +97,8 @@ export function keyLabel(code: string): string {
   if (code.startsWith('Digit')) return code.slice(5);
   const map: Record<string, string> = {
     Space: 'Space',
+    ShiftLeft: 'Shift',
+    ShiftRight: 'Shift',
     ArrowLeft: '←',
     ArrowRight: '→',
     ArrowUp: '↑',

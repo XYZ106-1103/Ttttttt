@@ -1,4 +1,4 @@
-import type { CraftResult, World } from '@world/shared';
+import type { CraftResult, EquipFail, EquipSlotId, LearnFail, StatKey, World } from '@world/shared';
 
 /**
  * Commands the UI may send to the game, and read-only queries it may make.
@@ -19,6 +19,19 @@ export interface GameCommands {
   craft(recipeId: string, times: number): CraftResult;
   /** Delete the saved world. `start` immediately begins a new adventure afterwards. */
   resetWorld(start: boolean): Promise<void>;
+  clickEquipment(slot: EquipSlotId): EquipFail | null;
+  allocateStat(stat: StatKey, amount: number): boolean;
+  autoAllocate(): boolean;
+  learnSkill(skillId: string): LearnFail | null;
+  setSkillSlot(slot: number, skillId: string | null): void;
+  advanceJob(jobId: string): boolean;
+  respawn(): boolean;
+  /** Developer commands (single player only; PHASE 6 restricts them to admins). */
+  devLevel(level: number): void;
+  devSummon(monsterId: string): boolean;
+  devGive(itemId: string, count: number): boolean;
+  devHeal(): void;
+  setMonsters(enabled: boolean): void;
 }
 
 export interface GameQueries {
@@ -69,6 +82,42 @@ export class GameBridge implements GameCommands, GameQueries {
   }
   async resetWorld(start: boolean): Promise<void> {
     await this.impl?.resetWorld(start);
+  }
+  clickEquipment(slot: EquipSlotId): EquipFail | null {
+    return this.impl?.clickEquipment(slot) ?? 'invalid';
+  }
+  allocateStat(stat: StatKey, amount: number): boolean {
+    return this.impl?.allocateStat(stat, amount) ?? false;
+  }
+  autoAllocate(): boolean {
+    return this.impl?.autoAllocate() ?? false;
+  }
+  learnSkill(skillId: string): LearnFail | null {
+    return this.impl?.learnSkill(skillId) ?? 'unknown';
+  }
+  setSkillSlot(slot: number, skillId: string | null): void {
+    this.impl?.setSkillSlot(slot, skillId);
+  }
+  advanceJob(jobId: string): boolean {
+    return this.impl?.advanceJob(jobId) ?? false;
+  }
+  respawn(): boolean {
+    return this.impl?.respawn() ?? false;
+  }
+  devLevel(level: number): void {
+    this.impl?.devLevel(level);
+  }
+  devSummon(monsterId: string): boolean {
+    return this.impl?.devSummon(monsterId) ?? false;
+  }
+  devGive(itemId: string, count: number): boolean {
+    return this.impl?.devGive(itemId, count) ?? false;
+  }
+  devHeal(): void {
+    this.impl?.devHeal();
+  }
+  setMonsters(enabled: boolean): void {
+    this.impl?.setMonsters(enabled);
   }
   getExplored(): ReadonlySet<number> {
     return this.impl?.getExplored() ?? new Set();

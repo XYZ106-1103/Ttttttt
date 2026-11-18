@@ -4,6 +4,8 @@ import { useStore } from '../hooks/useStore';
 import { closeWindow, focusWindow } from '../windowActions';
 import { CharacterWindow } from './CharacterWindow';
 import { InventoryWindow } from './InventoryWindow';
+import { JobAdvanceWindow } from './JobAdvanceWindow';
+import { SkillWindow } from './SkillWindow';
 import { WorldMapWindow } from './WorldMapWindow';
 import { KeyGuideWindow } from './KeyGuideWindow';
 import { SettingsWindow } from './SettingsWindow';
@@ -14,6 +16,8 @@ const COMPONENTS: Record<WindowId, typeof CharacterWindow> = {
   keyGuide: KeyGuideWindow,
   inventory: InventoryWindow,
   worldMap: WorldMapWindow,
+  skills: SkillWindow,
+  jobAdvance: JobAdvanceWindow,
 };
 
 /** Renders open windows in focus order (last = top). */

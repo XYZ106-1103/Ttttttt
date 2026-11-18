@@ -35,8 +35,11 @@ export class InteractionController {
   private pendingAt = Number.NaN;
   /** Total presses seen (diagnostics). */
   presses = 0;
+  /** Left-button presses not yet consumed by combat input. */
+  private attackPresses = 0;
   private readonly onDown = (p: Phaser.Input.Pointer): void => {
     this.presses++;
+    if (p.button === 0) this.attackPresses++;
     // `button` (which button changed) is reliable on the down event itself; the `buttons`
     // bitmask behind leftButtonDown() may not include it yet.
     if (p.button === 0) {
@@ -81,6 +84,19 @@ export class InteractionController {
    */
   settleClick(used: boolean, simTime: number): void {
     if (used || simTime - this.pendingAt > CLICK_BUFFER) this.pendingClick = false;
+  }
+
+  /** True once per left-button press since the last call (combat attack edge). */
+  consumeAttackPress(): boolean {
+    const n = this.attackPresses;
+    this.attackPresses = 0;
+    return n > 0;
+  }
+
+  /** Left button currently held over the game. */
+  get leftDown(): boolean {
+    const p = this.scene.input.activePointer;
+    return p.isDown && p.leftButtonDown();
   }
 
   /** Hotbar scroll steps accumulated since the last call (+ = next slot). */
