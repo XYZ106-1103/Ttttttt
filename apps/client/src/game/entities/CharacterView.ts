@@ -1,18 +1,49 @@
 import type Phaser from 'phaser';
 import { clamp, COLLISION_NONE, damp, type MotorState, TILE_SIZE, type World } from '@world/shared';
-import { characterAnimKey, characterKey, TEX } from '../render/textureKeys';
+import { ARM_ANGLES, ARM_PIVOT, ARM_REACH } from '../art/character/CharacterComposer';
+import { FRAME_SIZE } from '../art/character/rig';
+import {
+  characterAnimKey,
+  characterArmKey,
+  characterKey,
+  characterNoArmAnimKey,
+  characterNoArmKey,
+  TEX,
+} from '../render/textureKeys';
+import { characterRig } from '../render/textures';
 import type { FrameEvents } from './FrameEvents';
+import { Spring } from './Spring';
 
 export type AnimState = 'idle' | 'run' | 'jump' | 'apex' | 'fall' | 'land' | 'skid';
 
-import { Spring } from './Spring';
+export type UseKind = 'swing' | 'place';
+
+const TAU = Math.PI * 2;
+/** How long the arm stays raised after the last use. */
+const USE_LINGER = 0.28;
+
+function wrapAngle(a: number): number {
+  let r = a % TAU;
+  if (r <= -Math.PI) r += TAU;
+  if (r > Math.PI) r -= TAU;
+  return r;
+}
+
+const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 
 /**
  * Visual representation of a character driven by a MotorState. Purely cosmetic: it never
  * changes simulation state. The same view will render AI adventurers in PHASE 4.
+ *
+ * While an item is in use the body switches to a sheet without the front arm, and a separate
+ * arm sprite (24 pre-rendered angles) plus the held item swing toward the aim point — so the
+ * legs keep running while the arm works.
  */
 export class CharacterView {
   readonly sprite: Phaser.GameObjects.Sprite;
+  private readonly bodyNoArm: Phaser.GameObjects.Sprite;
+  private readonly arm: Phaser.GameObjects.Sprite;
+  private readonly held: Phaser.GameObjects.Image;
   private readonly shadow: Phaser.GameObjects.Image;
   private readonly nameTag: Phaser.GameObjects.Text;
   private state: AnimState = 'idle';
@@ -21,6 +52,11 @@ export class CharacterView {
   private readonly sy = new Spring(260, 18);
   private stepOffset = 0;
   private visible = true;
+  private heldItem: string | null = null;
+  private useKind: UseKind = 'swing';
+  private useStart = -10;
+  private useDuration = 0.25;
+  private lastUse = -10;
   runSpeed = 168;
 
   constructor(
@@ -37,7 +73,19 @@ export class CharacterView {
       .setDepth(19);
     this.sprite = scene.make.sprite({ x: 0, y: 0, key: characterKey(id), frame: 'idle_0' }, false);
     this.sprite.setOrigin(0.5, 1).setDepth(20);
-    worldLayer.add([this.shadow, this.sprite]);
+    this.bodyNoArm = scene.make.sprite(
+      { x: 0, y: 0, key: characterNoArmKey(id), frame: 'idle_0' },
+      false,
+    );
+    this.bodyNoArm.setOrigin(0.5, 1).setDepth(20).setVisible(false);
+    this.held = scene.make.image({ x: 0, y: 0, key: TEX.items, frame: 'worn_pickaxe' }, false);
+    this.held.setOrigin(0.15, 0.85).setDepth(20.5).setVisible(false);
+    this.arm = scene.make.sprite({ x: 0, y: 0, key: characterArmKey(id), frame: 'arm_6' }, false);
+    this.arm
+      .setOrigin(ARM_PIVOT / FRAME_SIZE, ARM_PIVOT / FRAME_SIZE)
+      .setDepth(21)
+      .setVisible(false);
+    worldLayer.add([this.shadow, this.sprite, this.bodyNoArm, this.held, this.arm]);
     this.nameTag = scene.make.text(
       {
         x: 0,
@@ -67,6 +115,24 @@ export class CharacterView {
     this.sprite.setVisible(v);
     this.shadow.setVisible(v);
     this.nameTag.setVisible(v);
+    if (!v) {
+      this.bodyNoArm.setVisible(false);
+      this.arm.setVisible(false);
+      this.held.setVisible(false);
+    }
+  }
+
+  /** Item shown in hand while using (null = bare hand). */
+  setHeldItem(itemId: string | null): void {
+    this.heldItem = itemId;
+  }
+
+  /** Start a swing (tools) or a short placing motion. */
+  triggerUse(kind: UseKind, duration: number, now: number): void {
+    this.useKind = kind;
+    this.useStart = now;
+    this.useDuration = Math.max(0.08, duration);
+    this.lastUse = now;
   }
 
   private play(state: AnimState): void {
@@ -74,14 +140,21 @@ export class CharacterView {
     this.state = state;
     this.stateTime = 0;
     this.sprite.play(characterAnimKey(this.id, state), true);
+    this.bodyNoArm.play(characterNoArmAnimKey(this.id, state), true);
+  }
+
+  private setTimeScale(s: number): void {
+    this.sprite.anims.timeScale = s;
+    this.bodyNoArm.anims.timeScale = s;
   }
 
   /**
    * @param x,y Interpolated feet position.
    * @param inputX Current horizontal input (for skid detection).
-   */
-  /**
    * @param labelScale World→label-layer scale (the label camera renders at 1× for crisp text).
+   * @param aim World point being aimed at, or null when no item is in use.
+   * @param now Simulation time (s) for swing timing.
+   * @param holding True while the use button is held.
    */
   update(
     dt: number,
@@ -91,11 +164,13 @@ export class CharacterView {
     ev: FrameEvents,
     inputX: number,
     labelScale: number,
+    aim: { x: number; y: number } | null = null,
+    now = 0,
+    holding = false,
   ): void {
     if (!this.visible) return;
     this.stateTime += dt;
 
-    // Auto-step: the simulation snaps a full tile; the view eases over it.
     if (ev.stepped !== 0) this.stepOffset += ev.stepped;
     this.stepOffset = damp(this.stepOffset, 0, 0.035, dt);
     if (Math.abs(this.stepOffset) < 0.05) this.stepOffset = 0;
@@ -126,27 +201,75 @@ export class CharacterView {
         // let the landing pose finish
       } else if (speed > 14) {
         this.play('run');
-        this.sprite.anims.timeScale = 0.55 + 0.6 * clamp(speed / this.runSpeed, 0, 1);
+        this.setTimeScale(0.55 + 0.6 * clamp(speed / this.runSpeed, 0, 1));
       } else {
         this.play('idle');
-        this.sprite.anims.timeScale = 1;
+        this.setTimeScale(1);
       }
     } else {
-      this.sprite.anims.timeScale = 1;
+      this.setTimeScale(1);
       if (m.vy < -90) {
         if (this.state !== 'jump') this.play('jump');
       } else if (m.vy <= 90) this.play('apex');
       else this.play('fall');
     }
 
+    const using =
+      aim !== null &&
+      (holding || now - this.lastUse < Math.max(USE_LINGER, this.useDuration + 0.08));
+    const drawY = y + this.stepOffset;
     const sx = this.sx.update(dt);
     const sy = this.sy.update(dt);
-    this.sprite.setFlipX(facing < 0);
-    this.sprite.setScale(sx, sy);
-    const drawY = y + this.stepOffset;
-    this.sprite.setPosition(x, drawY);
+    let shoulderX = 0;
+    let shoulderY = 0;
+    if (using && aim) {
+      // Face the aim point while working, like every good sandbox game.
+      const frameName = this.bodyNoArm.frame.name;
+      const sh = characterRig(this.id)?.shoulders.get(String(frameName)) ?? { x: 34, y: 25 };
+      facing = aim.x >= x ? 1 : -1;
+      shoulderX = x + (sh.x - FRAME_SIZE / 2) * facing * sx;
+      shoulderY = drawY - (FRAME_SIZE - sh.y) * sy;
+    }
 
-    // Ground shadow: find the floor below and fade with height.
+    for (const body of [this.sprite, this.bodyNoArm]) {
+      body
+        .setFlipX(facing < 0)
+        .setScale(sx, sy)
+        .setPosition(x, drawY);
+    }
+    this.sprite.setVisible(!using);
+    this.bodyNoArm.setVisible(using);
+    this.arm.setVisible(using);
+    this.held.setVisible(using && this.heldItem !== null);
+
+    if (using && aim) {
+      const aimWorld = Math.atan2(aim.y - shoulderY, aim.x - shoulderX);
+      const aimLocal = wrapAngle(facing > 0 ? aimWorld : Math.PI - aimWorld);
+      const t = clamp((now - this.useStart) / this.useDuration, 0, 1);
+      const [from, to] =
+        this.useKind === 'swing'
+          ? [aimLocal - 1.75, aimLocal + 0.55]
+          : [aimLocal - 0.5, aimLocal + 0.12];
+      const local = from + (to - from) * easeOutCubic(t);
+      const idx = ((Math.round(local / (TAU / ARM_ANGLES)) % ARM_ANGLES) + ARM_ANGLES) % ARM_ANGLES;
+      this.arm
+        .setFrame(`arm_${idx}`)
+        .setFlipX(facing < 0)
+        .setPosition(shoulderX, shoulderY);
+      const quantized = (idx / ARM_ANGLES) * TAU;
+      const world = facing > 0 ? quantized : Math.PI - quantized;
+      if (this.heldItem) {
+        this.held
+          .setFrame(this.heldItem)
+          .setPosition(
+            shoulderX + Math.cos(world) * ARM_REACH,
+            shoulderY + Math.sin(world) * ARM_REACH,
+          )
+          .setRotation(world + Math.PI / 4)
+          .setScale(this.useKind === 'place' ? 0.7 : 1);
+      }
+    }
+
     const tx = Math.floor(x / TILE_SIZE);
     let groundY = -1;
     for (let k = 0; k < 8; k++) {
@@ -171,6 +294,9 @@ export class CharacterView {
 
   destroy(): void {
     this.sprite.destroy();
+    this.bodyNoArm.destroy();
+    this.arm.destroy();
+    this.held.destroy();
     this.shadow.destroy();
     this.nameTag.destroy();
   }

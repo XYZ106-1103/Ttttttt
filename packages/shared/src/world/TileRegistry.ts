@@ -78,4 +78,8 @@ export const TILE = {
   dirtWall: tileRegistry.idOf('dirt_wall'),
   stoneWall: tileRegistry.idOf('stone_wall'),
   woodBeam: tileRegistry.idOf('wood_beam'),
+  copperOre: tileRegistry.idOf('copper_ore'),
+  ironOre: tileRegistry.idOf('iron_ore'),
+  torch: tileRegistry.idOf('torch'),
+  stoneBricks: tileRegistry.idOf('stone_bricks'),
 } as const;

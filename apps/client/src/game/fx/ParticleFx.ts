@@ -14,6 +14,7 @@ export class ParticleFx {
   private readonly leaves: Emitter;
   private readonly fireflies: Emitter;
   private readonly embers: Emitter;
+  private readonly debrisEmitter: Emitter;
   private readonly rng = new Rng(77);
   private runTimer = 0;
   private leafTimer = 0;
@@ -48,7 +49,18 @@ export class ParticleFx {
       emitting: false,
     });
     this.leaves.setDepth(39);
-    worldLayer.add([this.dust, this.leaves]);
+    this.debrisEmitter = new P(scene, 0, 0, TEX.fx, {
+      frame: 'pixel',
+      lifespan: { min: 280, max: 620 },
+      speed: { min: 40, max: 130 },
+      angle: { min: 200, max: 340 },
+      gravityY: 420,
+      scale: { min: 1, max: 2 },
+      alpha: { start: 1, end: 0.2 },
+      emitting: false,
+    });
+    this.debrisEmitter.setDepth(23);
+    worldLayer.add([this.dust, this.leaves, this.debrisEmitter]);
 
     this.fireflies = new P(scene, 0, 0, TEX.fx, {
       frame: 'firefly',
@@ -74,6 +86,14 @@ export class ParticleFx {
       emitting: false,
     });
     overlayLayer.add([this.fireflies, this.embers]);
+  }
+
+  /** Tile- or object-colored debris burst (mining, chopping, breaking). */
+  debris(x: number, y: number, color: number, count: number): void {
+    this.debrisEmitter.setParticleTint(color);
+    for (let i = 0; i < count; i++) {
+      this.debrisEmitter.emitParticleAt(x + this.rng.range(-5, 5), y + this.rng.range(-5, 5), 1);
+    }
   }
 
   footDust(x: number, y: number, count: number, spread = 4): void {

@@ -18,6 +18,47 @@ export interface TileStamp {
   sampleBg?(tx: number, ty: number): number;
 }
 
+/**
+ * A winding vertical shaft carved from the surface down into the cave layer — a natural cave
+ * entrance. Carves air in the foreground; walls stay so the shaft reads as underground.
+ */
+export class ShaftStamp implements TileStamp {
+  readonly x0: number;
+  readonly y0: number;
+  readonly x1: number;
+  readonly y1: number;
+  private readonly centers: Float32Array;
+  private readonly halfWidth: number;
+
+  constructor(x: number, top: number, depth: number, seed: number) {
+    this.y0 = top;
+    this.y1 = top + depth;
+    this.centers = new Float32Array(depth + 1);
+    this.halfWidth = 1.4;
+    let minX = x;
+    let maxX = x;
+    for (let i = 0; i <= depth; i++) {
+      const wobble =
+        Math.sin(i * 0.17 + hash1f(1, seed) * 6) * 2.2 +
+        Math.sin(i * 0.05 + hash1f(2, seed) * 6) * 3;
+      const cx = x + wobble;
+      this.centers[i] = cx;
+      minX = Math.min(minX, cx);
+      maxX = Math.max(maxX, cx);
+    }
+    this.x0 = Math.floor(minX - 3);
+    this.x1 = Math.ceil(maxX + 3);
+  }
+
+  sampleFg(tx: number, ty: number): number {
+    if (ty < this.y0 || ty > this.y1) return -1;
+    const c = this.centers[ty - this.y0] ?? 0;
+    // Funnel-shaped mouth near the surface.
+    const mouth = ty - this.y0 < 3 ? 1.2 : 0;
+    return Math.abs(tx + 0.5 - c - 0.5) <= this.halfWidth + mouth ? 0 : -1;
+  }
+}
+
 /** A vertical wooden support post in the background layer (non-colliding). */
 export class PostStamp implements TileStamp {
   readonly x0: number;

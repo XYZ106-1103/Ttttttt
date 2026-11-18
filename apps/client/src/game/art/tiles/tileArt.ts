@@ -6,7 +6,17 @@
  * layout (see TilesetGenerator) and skip generation for that key.
  */
 export type TileStyle =
-  'soil' | 'grass' | 'stone' | 'mossy' | 'platform' | 'planks' | 'wall' | 'beam';
+  | 'soil'
+  | 'grass'
+  | 'stone'
+  | 'mossy'
+  | 'ore'
+  | 'bricks'
+  | 'torch'
+  | 'platform'
+  | 'planks'
+  | 'wall'
+  | 'beam';
 
 export interface TileRecipe {
   readonly style: TileStyle;
@@ -39,6 +49,29 @@ export const TILE_RECIPES: Readonly<Record<string, TileRecipe>> = {
     ramp: ['#33384a', '#474e62', '#5b6378', '#727b90', '#8f98ab'],
     outline: '#1e2130',
     accent: ['#2a4a32', '#3d6a42', '#5a8f4e', '#7db35e'],
+  },
+  copper_ore: {
+    style: 'ore',
+    ramp: ['#33384a', '#474e62', '#5b6378', '#727b90', '#8f98ab'],
+    outline: '#1e2130',
+    accent: ['#4a2210', '#a4532a', '#d9803f', '#f6b871'],
+  },
+  iron_ore: {
+    style: 'ore',
+    ramp: ['#33384a', '#474e62', '#5b6378', '#727b90', '#8f98ab'],
+    outline: '#1e2130',
+    accent: ['#2e3240', '#8790a6', '#c3cbda', '#f2f5fa'],
+  },
+  stone_bricks: {
+    style: 'bricks',
+    ramp: ['#33363f', '#4f5463', '#686e7e', '#848a9a', '#a3a9b7'],
+    outline: '#1b1d25',
+  },
+  torch: {
+    style: 'torch',
+    ramp: ['#3e2618', '#5c3a22', '#7e5232', '#a06c42', '#c48d5a'],
+    outline: '#24150e',
+    accent: ['#c7381f', '#f06a24', '#f9a63a', '#ffd86a', '#fff6c8'],
   },
   wood_platform: {
     style: 'platform',

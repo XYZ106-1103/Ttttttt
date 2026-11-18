@@ -13,15 +13,13 @@ import { toggleWindow } from './windowActions';
 import { WindowLayer } from './windows/WindowLayer';
 
 const LOCKED: Partial<Record<UiAction, { key: string; phase: string }>> = {
-  inventory: { key: 'hud.inventory', phase: 'PHASE 2' },
   skills: { key: 'hud.skills', phase: 'PHASE 3' },
   quests: { key: 'hud.quests', phase: 'PHASE 3' },
-  worldMap: { key: 'hud.worldMap', phase: 'PHASE 2' },
 };
 
 /** Global hotkeys → UI state. Gameplay keys are polled by the simulation instead. */
 function useHotkeys(): void {
-  const { stores, input } = useServices();
+  const { stores, input, bridge } = useServices();
   useEffect(
     () =>
       input.onUiAction((action) => {
@@ -40,6 +38,12 @@ function useHotkeys(): void {
           case 'character':
             if (playing) toggleWindow(stores, 'character');
             break;
+          case 'inventory':
+            if (playing) toggleWindow(stores, 'inventory');
+            break;
+          case 'worldMap':
+            if (playing) toggleWindow(stores, 'worldMap');
+            break;
           case 'keyGuide':
             toggleWindow(stores, 'keyGuide');
             break;
@@ -47,6 +51,10 @@ function useHotkeys(): void {
             stores.ui.set({ debugVisible: !ui.debugVisible });
             break;
           default: {
+            if (action.startsWith('hotbar')) {
+              if (playing && !ui.chatOpen) bridge.selectSlot((Number(action.slice(6)) + 9) % 10);
+              break;
+            }
             const locked = LOCKED[action];
             if (locked && playing)
               pushChat(
@@ -57,7 +65,7 @@ function useHotkeys(): void {
           }
         }
       }),
-    [input, stores],
+    [input, stores, bridge],
   );
 }
 

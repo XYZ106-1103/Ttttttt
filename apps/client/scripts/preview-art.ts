@@ -81,7 +81,7 @@ if (which === 'all' || which === 'tiles') {
   const ox = Number(process.argv[4] ?? world.generator.spawnTileX - 40);
   const W = 100;
   const H = 46;
-  const oy = world.surfaceY(world.generator.spawnTileX) - 30;
+  const oy = world.surfaceY(world.generator.spawnTileX) - 30 + Number(process.argv[5] ?? 0);
   const pc = new PixelCanvas(W * 16, H * 16);
   pc.fillRect(0, 0, pc.width, pc.height, hex('#9cc7e0'));
   for (let ty = 0; ty < H; ty++) {
@@ -145,4 +145,16 @@ if (which === 'all' || which === 'background') {
   pc.blit(generateSun(), 800, 30);
   pc.blit(generateMoon(), 900, 30);
   save('background', pc, 1);
+}
+
+import { generateItemIcons } from '../src/game/art/items/ItemArt';
+import { generateFxAtlas } from '../src/game/art/fx/FxArt';
+
+if (which === 'all' || which === 'items') {
+  const ts = generateTileset(tileRegistry);
+  const icons = [...generateItemIcons(ts).values()];
+  const sheet = new PixelCanvas(18 * icons.length, 18);
+  icons.forEach((pc, i) => sheet.blit(pc, i * 18 + 1, 1));
+  save('items', sheet, 5, '#2a2f45');
+  save('fx', generateFxAtlas().canvas, 5, '#7d9fb4');
 }

@@ -3,7 +3,8 @@ import { DebugOverlay } from './DebugOverlay';
 import { ExpBar } from './ExpBar';
 import { MenuBar } from './MenuBar';
 import { Minimap } from './Minimap';
-import { QuickSlots } from './QuickSlots';
+import { Hotbar } from './Hotbar';
+import { PickupFeed } from './PickupFeed';
 import { RegionBanner } from './RegionBanner';
 import { StatusPanel } from './StatusPanel';
 
@@ -14,7 +15,8 @@ export function Hud() {
       <Minimap />
       <RegionBanner />
       <ChatBox />
-      <QuickSlots />
+      <Hotbar />
+      <PickupFeed />
       <MenuBar />
       <ExpBar />
       <DebugOverlay />

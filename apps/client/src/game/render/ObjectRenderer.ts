@@ -2,8 +2,10 @@ import Phaser from 'phaser';
 import {
   CHUNK_PIXELS,
   getObjectDef,
+  type ObjectChange,
   type ObjectLight,
   TILE_SIZE,
+  tileToChunk,
   type World,
   type WorldObject,
 } from '@world/shared';
@@ -21,7 +23,7 @@ export interface LitObject {
 }
 
 interface ChunkObjects {
-  sprites: Phaser.GameObjects.GameObject[];
+  sprites: Map<number, Phaser.GameObjects.Sprite>;
   lights: LitObject[];
 }
 
@@ -34,11 +36,14 @@ const DEPTH_BACK = 10;
 const DEPTH_FRONT = 40;
 
 /**
- * Streams world-object sprites (trees, flora, props) with the same chunk window as the tiles.
+ * Streams world-object sprites (trees, flora, props) with the same chunk window as the tiles,
+ * rebuilds a chunk's sprites when its objects change, and plays hit / felling feedback.
  * Light-emitting objects also get an additive glow in the unlit overlay layer.
  */
 export class ObjectRenderer {
   private readonly chunks = new Map<number, ChunkObjects>();
+  private readonly stale = new Set<number>();
+  private readonly unsubscribe: () => void;
   buildBudget = 3;
   private spriteCount = 0;
 
@@ -47,10 +52,56 @@ export class ObjectRenderer {
     private readonly worldLayer: Phaser.GameObjects.Layer,
     private readonly overlayLayer: Phaser.GameObjects.Layer,
     private readonly world: World,
-  ) {}
+  ) {
+    this.unsubscribe = world.onObjectChange((c) => this.onObjectChange(c));
+  }
 
   get count(): number {
     return this.spriteCount;
+  }
+
+  private onObjectChange(change: ObjectChange): void {
+    const k = change.cy * this.world.widthChunks + change.cx;
+    const chunk = this.chunks.get(k);
+    if (!chunk) return;
+    const sprite = chunk.sprites.get(change.removed.id);
+    if (sprite && change.removed.key.startsWith('tree_')) this.fell(sprite);
+    this.stale.add(k);
+  }
+
+  /** A felled tree topples away from the player and fades out. */
+  private fell(source: Phaser.GameObjects.Sprite): void {
+    const ghost = this.scene.make.sprite(
+      { x: source.x, y: source.y, key: TEX.objects, frame: source.frame.name },
+      false,
+    );
+    ghost.setOrigin(0.5, 1).setDepth(source.depth).setFlipX(source.flipX);
+    this.worldLayer.add(ghost);
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    this.scene.tweens.add({
+      targets: ghost,
+      angle: dir * 82,
+      alpha: 0,
+      duration: 900,
+      ease: 'Quad.easeIn',
+      onComplete: () => ghost.destroy(),
+    });
+  }
+
+  /** Brief shake on a hit object (trees being chopped, rocks being mined). */
+  shake(object: WorldObject): void {
+    const k = tileToChunk(object.ty) * this.world.widthChunks + tileToChunk(object.tx);
+    const sprite = this.chunks.get(k)?.sprites.get(object.id);
+    if (!sprite) return;
+    const baseX = object.tx * TILE_SIZE + TILE_SIZE / 2;
+    this.scene.tweens.killTweensOf(sprite);
+    sprite.x = baseX;
+    this.scene.tweens.add({
+      targets: sprite,
+      x: { from: baseX + 1.5, to: baseX },
+      duration: 160,
+      ease: 'Bounce.easeOut',
+    });
   }
 
   update(view: ViewRect, timeSec: number): void {
@@ -65,6 +116,14 @@ export class ObjectRenderer {
       w.heightChunks - 1,
       Math.floor((view.top + view.height) / CHUNK_PIXELS) + 1,
     );
+
+    for (const k of this.stale) {
+      const c = this.chunks.get(k);
+      if (c) this.release(c);
+      this.chunks.delete(k);
+    }
+    this.stale.clear();
+
     let built = 0;
     for (let cy = cy0; cy <= cy1 && built < this.buildBudget; cy++) {
       for (let cx = cx0; cx <= cx1 && built < this.buildBudget; cx++) {
@@ -78,13 +137,10 @@ export class ObjectRenderer {
       const cx = k % w.widthChunks;
       const cy = Math.floor(k / w.widthChunks);
       if (cx < cx0 - 2 || cx > cx1 + 2 || cy < cy0 - 2 || cy > cy1 + 2) {
-        for (const s of c.sprites) s.destroy();
-        for (const l of c.lights) l.glow?.destroy();
-        this.spriteCount -= c.sprites.length;
+        this.release(c);
         this.chunks.delete(k);
       }
     }
-    // Animate glows.
     for (const c of this.chunks.values()) {
       for (const l of c.lights) {
         if (!l.glow) continue;
@@ -94,8 +150,14 @@ export class ObjectRenderer {
     }
   }
 
+  private release(c: ChunkObjects): void {
+    for (const s of c.sprites.values()) s.destroy();
+    for (const l of c.lights) l.glow?.destroy();
+    this.spriteCount -= c.sprites.size;
+  }
+
   private build(cx: number, cy: number): ChunkObjects {
-    const out: ChunkObjects = { sprites: [], lights: [] };
+    const out: ChunkObjects = { sprites: new Map(), lights: [] };
     for (const o of this.world.objectsInChunk(cx, cy)) {
       const def = getObjectDef(o.key);
       const x = o.tx * TILE_SIZE + TILE_SIZE / 2;
@@ -107,12 +169,11 @@ export class ObjectRenderer {
       );
       sprite.setOrigin(0.5, 1);
       sprite.setDepth(DEPTH[o.key] ?? (def.depth === 'front' ? DEPTH_FRONT : DEPTH_BACK));
-      // Mirror some plants for extra variety.
       if (o.key !== 'campfire' && o.key !== 'signpost' && (o.seed & 4) !== 0) sprite.setFlipX(true);
       if (frames > 1)
         sprite.play({ key: objectAnimKey(o.key, o.variant), startFrame: o.seed % frames });
       this.worldLayer.add(sprite);
-      out.sprites.push(sprite);
+      out.sprites.set(o.id, sprite);
       if (def.light) {
         const glow = this.scene.make.image({ x, y: y - 8, key: TEX.glow }, false);
         glow.setBlendMode(Phaser.BlendModes.ADD).setTint(0xffa456).setAlpha(0.35).setScale(2.6);
@@ -120,7 +181,7 @@ export class ObjectRenderer {
         out.lights.push({ object: o, light: def.light, x, y: y - 8, glow });
       }
     }
-    this.spriteCount += out.sprites.length;
+    this.spriteCount += out.sprites.size;
     return out;
   }
 
@@ -130,10 +191,8 @@ export class ObjectRenderer {
   }
 
   destroy(): void {
-    for (const c of this.chunks.values()) {
-      for (const s of c.sprites) s.destroy();
-      for (const l of c.lights) l.glow?.destroy();
-    }
+    this.unsubscribe();
+    for (const c of this.chunks.values()) this.release(c);
     this.chunks.clear();
     this.spriteCount = 0;
   }

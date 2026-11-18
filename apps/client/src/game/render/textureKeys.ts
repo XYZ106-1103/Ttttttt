@@ -4,6 +4,7 @@
  */
 export const TEX = {
   tiles: 'tiles',
+  items: 'items',
   objects: 'objects',
   fx: 'fx',
   glow: 'fx_glow',
@@ -27,6 +28,20 @@ export function characterKey(id: string): string {
 
 export function characterAnimKey(id: string, anim: string): string {
   return `${characterKey(id)}:${anim}`;
+}
+
+/** Body sheet without the front arm (used while an item is being used). */
+export function characterNoArmKey(id: string): string {
+  return `char_${id}_noarm`;
+}
+
+export function characterNoArmAnimKey(id: string, anim: string): string {
+  return `${characterNoArmKey(id)}:${anim}`;
+}
+
+/** Front-arm frames at discrete angles. */
+export function characterArmKey(id: string): string {
+  return `char_${id}_arm`;
 }
 
 export function objectAnimKey(objectKey: string, variant: number): string {

@@ -7,6 +7,8 @@ export interface UiServices {
   readonly stores: Stores;
   readonly bridge: GameBridge;
   readonly input: InputManager;
+  /** Item id → data URL icon (filled once the game has booted). */
+  readonly icons: Record<string, string>;
 }
 
 export const UiContext = createContext<UiServices | null>(null);

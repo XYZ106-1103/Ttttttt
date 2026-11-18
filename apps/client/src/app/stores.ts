@@ -1,4 +1,4 @@
-import type { BaseStats } from '@world/shared';
+import type { BaseStats, ItemStack } from '@world/shared';
 import { createSettingsStore, type Settings } from './settings';
 import { createStore, type Store } from './store';
 
@@ -11,6 +11,28 @@ export interface AppState {
   readonly error: string | null;
   /** Full-screen fade (0 = clear, 1 = black) used for scene transitions. */
   readonly fade: number;
+  /** A saved world exists (title shows "Continue"). */
+  readonly hasSave: boolean;
+  /** Saves survive reloads (false when IndexedDB is unavailable). */
+  readonly persistent: boolean;
+}
+
+export interface InventoryState {
+  readonly slots: readonly (ItemStack | null)[];
+  readonly cursor: ItemStack | null;
+  readonly selected: number;
+  readonly version: number;
+}
+
+export interface FeedEntry {
+  readonly id: number;
+  readonly itemId: string;
+  readonly count: number;
+}
+
+export interface FeedState {
+  readonly pickups: readonly FeedEntry[];
+  readonly toast: { readonly id: number; readonly text: string } | null;
 }
 
 export interface PlayerState {
@@ -51,7 +73,7 @@ export interface ChatState {
   readonly messages: readonly ChatMessage[];
 }
 
-export type WindowId = 'character' | 'settings' | 'keyGuide';
+export type WindowId = 'character' | 'settings' | 'keyGuide' | 'inventory' | 'worldMap';
 
 export interface UiState {
   readonly windows: readonly WindowId[];
@@ -74,6 +96,8 @@ export interface DebugState {
   readonly objects: number;
   readonly simSteps: number;
   readonly updateMs: number;
+  readonly drops: number;
+  readonly modifiedChunks: number;
 }
 
 export interface Stores {
@@ -84,6 +108,8 @@ export interface Stores {
   readonly ui: Store<UiState>;
   readonly debug: Store<DebugState>;
   readonly settings: Store<Settings>;
+  readonly inventory: Store<InventoryState>;
+  readonly feed: Store<FeedState>;
 }
 
 export function createStores(): Stores {
@@ -94,6 +120,8 @@ export function createStores(): Stores {
       bootLabel: '',
       error: null,
       fade: 1,
+      hasSave: false,
+      persistent: true,
     }),
     player: createStore<PlayerState>({
       name: '',
@@ -138,8 +166,12 @@ export function createStores(): Stores {
       objects: 0,
       simSteps: 0,
       updateMs: 0,
+      drops: 0,
+      modifiedChunks: 0,
     }),
     settings: createSettingsStore(),
+    inventory: createStore<InventoryState>({ slots: [], cursor: null, selected: 0, version: -1 }),
+    feed: createStore<FeedState>({ pickups: [], toast: null }),
   };
 }
 
@@ -155,4 +187,27 @@ export function pushChat(
   stores.chat.set((s) => ({
     messages: [...s.messages, { id: ++chatId, channel, author, text }].slice(-MAX_CHAT),
   }));
+}
+
+let feedId = 0;
+
+/** Add a pickup to the feed (merging with a recent entry of the same item). */
+export function pushPickup(stores: Stores, itemId: string, count: number): void {
+  stores.feed.set((f) => {
+    const last = f.pickups[f.pickups.length - 1];
+    if (last && last.itemId === itemId) {
+      return {
+        pickups: [...f.pickups.slice(0, -1), { id: ++feedId, itemId, count: last.count + count }],
+      };
+    }
+    return { pickups: [...f.pickups, { id: ++feedId, itemId, count }].slice(-6) };
+  });
+}
+
+export function dropPickup(stores: Stores, id: number): void {
+  stores.feed.set((f) => ({ pickups: f.pickups.filter((p) => p.id !== id) }));
+}
+
+export function showToast(stores: Stores, text: string): void {
+  stores.feed.set({ toast: { id: ++feedId, text } });
 }

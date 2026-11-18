@@ -1,10 +1,12 @@
 import Phaser from 'phaser';
 import { t } from '../../i18n';
 import type { GameServices } from '../services';
+import { WORLD_ID } from '../worldConfig';
 import {
   characterPortraitDataUrl,
   ensureCharacterTexture,
   registerFx,
+  registerItems,
   registerObjects,
   registerSky,
   registerTileset,
@@ -53,6 +55,13 @@ export class BootScene extends Phaser.Scene {
         ['boot.objects', () => registerObjects(this)],
         ['boot.sky', () => (assets.parallax = registerSky(this))],
         ['boot.textures', () => registerFx(this)],
+        [
+          'boot.items',
+          () => {
+            if (assets.tileset)
+              Object.assign(this.services.icons, registerItems(this, assets.tileset));
+          },
+        ],
       ];
       for (let i = 0; i < steps.length; i++) {
         const [label, run] = steps[i] as [string, () => void];
@@ -61,6 +70,15 @@ export class BootScene extends Phaser.Scene {
         run();
       }
       progress(0.9, t('boot.world'));
+      try {
+        assets.save = await this.services.saveStore.load(WORLD_ID);
+      } catch (err) {
+        console.error('Failed to load save', err);
+      }
+      stores.app.set({
+        hasSave: assets.save.player !== null,
+        persistent: this.services.saveStore.persistent,
+      });
       await nextFrame();
       this.scene.start('World');
     } catch (err) {

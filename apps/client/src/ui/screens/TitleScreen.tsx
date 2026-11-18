@@ -1,11 +1,15 @@
+import { useState } from 'react';
 import { t } from '../../i18n';
 import { Button } from '../components/Button';
 import { useServices } from '../context';
+import { useStore } from '../hooks/useStore';
 import { toggleWindow } from '../windowActions';
 
 /** Title menu over the live world (the camera drifts across the start zone at golden hour). */
 export function TitleScreen() {
   const { bridge, stores } = useServices();
+  const hasSave = useStore(stores.app, (s) => s.hasSave);
+  const [confirming, setConfirming] = useState(false);
   return (
     <div className="pw-title" data-testid="title-screen">
       <div className="pw-title__brand">
@@ -13,11 +17,32 @@ export function TitleScreen() {
         <p className="pw-title__tagline">{t('app.tagline')}</p>
       </div>
       <div className="pw-title__menu pw-panel pw-panel--ornate">
-        <Button variant="primary" onClick={() => bridge.startGame()} testId="start-button">
-          {t('title.start')}
-        </Button>
-        <Button onClick={() => toggleWindow(stores, 'settings')}>{t('title.settings')}</Button>
-        <Button onClick={() => toggleWindow(stores, 'keyGuide')}>{t('title.controls')}</Button>
+        {confirming ? (
+          <>
+            <p className="pw-title__confirm">{t('title.newWorldConfirm')}</p>
+            <Button
+              variant="primary"
+              onClick={() => void bridge.resetWorld(true)}
+              testId="confirm-new-world"
+            >
+              {t('title.confirm')}
+            </Button>
+            <Button onClick={() => setConfirming(false)}>{t('title.cancel')}</Button>
+          </>
+        ) : (
+          <>
+            <Button variant="primary" onClick={() => bridge.startGame()} testId="start-button">
+              {hasSave ? t('title.continue') : t('title.start')}
+            </Button>
+            {hasSave ? (
+              <Button onClick={() => setConfirming(true)} testId="new-world-button">
+                {t('title.newWorld')}
+              </Button>
+            ) : null}
+            <Button onClick={() => toggleWindow(stores, 'settings')}>{t('title.settings')}</Button>
+            <Button onClick={() => toggleWindow(stores, 'keyGuide')}>{t('title.controls')}</Button>
+          </>
+        )}
       </div>
       <p className="pw-title__notice">{t('title.notice')}</p>
       <div className="pw-title__version">{t('app.version')}</div>

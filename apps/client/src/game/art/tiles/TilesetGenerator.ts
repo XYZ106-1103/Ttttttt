@@ -299,6 +299,76 @@ function platformFrame(
   if (e) end(T - 1, -1);
 }
 
+/** Ore: stone body with metallic nuggets (highlight + shadow pixel each). */
+function oreNuggets(pc: PixelCanvas, ore: Pal, seed: number): void {
+  const rng = new Rng(seed + 501);
+  const count = rng.int(3, 4);
+  for (let i = 0; i < count; i++) {
+    const x = rng.int(2, 11);
+    const y = rng.int(2, 11);
+    const w = rng.int(2, 3);
+    const h = rng.int(1, 2);
+    for (let yy = y; yy <= y + h; yy++) {
+      for (let xx = x; xx < x + w; xx++) pc.set(xx, yy, (yy === y ? ore[2] : ore[1]) ?? 0);
+    }
+    pc.set(x, y, ore[3] ?? 0);
+    pc.set(x + w - 1, y + h, ore[0] ?? 0);
+    pc.set(x + w, y + h, mix(pc.get(x + w, y + h), ore[0] ?? 0, 0.6));
+  }
+}
+
+/** Stone bricks: staggered 8×4 courses, mortar lines, per-brick bevel. */
+function bricksBase(pc: PixelCanvas, pal: Pal, seed: number): void {
+  for (let y = 0; y < T; y++) {
+    const course = y >> 2;
+    const offset = course % 2 === 0 ? 0 : 4;
+    for (let x = 0; x < T; x++) {
+      const bx = (x + offset) % 8;
+      const by = y % 4;
+      let c = pal[2] ?? 0;
+      if (by === 3 || bx === 7) c = pal[0] ?? 0;
+      else if (by === 0 || bx === 0) c = pal[3] ?? 0;
+      else if (by === 2 && bx === 6) c = pal[1] ?? 0;
+      if (c === pal[2] && hash2f(x, y, seed) < 0.12) c = pal[1] ?? c;
+      pc.set(x, y, c);
+    }
+  }
+}
+
+/** Torch: stick + teardrop flame. `frame` animates the flame for in-world sprites. */
+export function drawTorch(pc: PixelCanvas, wood: Pal, fire: Pal, outline: Color, frame = 0): void {
+  for (let y = 7; y < 15; y++) {
+    pc.set(7, y, wood[3] ?? 0);
+    pc.set(8, y, wood[1] ?? 0);
+  }
+  pc.set(7, 6, wood[0] ?? 0);
+  pc.set(8, 6, wood[0] ?? 0);
+  const sway = [0, 1, 0, -1][frame % 4] ?? 0;
+  const stretch = [0, 0.4, 0.8, 0.3][frame % 4] ?? 0;
+  const shape = [
+    [7.5, 5, 2.2],
+    [7.5 + sway * 0.4, 3.6 - stretch * 0.3, 1.7],
+    [7.5 + sway * 0.8, 2.2 - stretch * 0.6, 1.1],
+    [7.5 + sway, 1 - stretch, 0.6],
+  ] as const;
+  shape.forEach(([cx, cy, r], i) => {
+    for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+      for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+        if ((x + 0.5 - cx - 0.5) ** 2 + (y + 0.5 - cy) ** 2 <= r * r)
+          pc.set(x, y, fire[Math.min(4, i + 1)] ?? 0);
+      }
+    }
+  });
+  pc.set(7, 5, fire[4] ?? 0);
+  pc.set(8, 4, fire[4] ?? 0);
+  const copy = pc.clone();
+  copy.outline(outline);
+  for (let y = 0; y < T; y++) {
+    for (let x = 0; x < T; x++)
+      if (!pc.isOpaque(x, y) && copy.isOpaque(x, y)) pc.set(x, y, mix(outline, fire[0] ?? 0, 0.35));
+  }
+}
+
 /** Vertical support post (6px wide) with a cap when nothing connects above. */
 function beamFrame(pc: PixelCanvas, mask: number, pal: Pal, outline: Color, seed: number): void {
   const x0 = 5;
@@ -353,6 +423,18 @@ function generateFrame(
       stoneBase(pc, pal, outline, vseed);
       applyMoss(pc, mask, accent, vseed);
       applyEdges(pc, mask, pal, outline);
+      break;
+    case 'ore':
+      stoneBase(pc, pal, outline, vseed);
+      oreNuggets(pc, accent, vseed);
+      applyEdges(pc, mask, pal, outline);
+      break;
+    case 'bricks':
+      bricksBase(pc, pal, vseed);
+      applyEdges(pc, mask, pal, outline);
+      break;
+    case 'torch':
+      drawTorch(pc, pal, accent, outline);
       break;
     case 'planks':
       planksBase(pc, pal, vseed);

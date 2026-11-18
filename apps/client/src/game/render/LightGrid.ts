@@ -1,4 +1,5 @@
 import { COLLISION_NONE, type World } from '@world/shared';
+import { flicker } from './flicker';
 
 export interface PointLight {
   readonly tx: number;
@@ -43,6 +44,7 @@ export class LightGrid {
     y0: number,
     ambient: readonly [number, number, number],
     lights: readonly PointLight[],
+    timeSec = 0,
   ): void {
     this.x0 = x0;
     this.y0 = y0;
@@ -63,6 +65,14 @@ export class LightGrid {
           const fg = world.getFg(tx, ty);
           pass[i] = tiles.lightPass[fg] ?? 1;
           lit = (tiles.collision[fg] ?? 0) === COLLISION_NONE && world.getBg(tx, ty) === 0;
+          const emit = fg !== 0 ? tiles.get(fg)?.light : undefined;
+          if (emit) {
+            const f = flicker(timeSec, (tx * 73856093) ^ (ty * 19349663), 0.12);
+            r[i] = Math.max(lit ? ambient[0] : 0, emit[0] * f);
+            g[i] = Math.max(lit ? ambient[1] : 0, emit[1] * f);
+            b[i] = Math.max(lit ? ambient[2] : 0, emit[2] * f);
+            continue;
+          }
         }
         r[i] = lit ? ambient[0] : 0;
         g[i] = lit ? ambient[1] : 0;

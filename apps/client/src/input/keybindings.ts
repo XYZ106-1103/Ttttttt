@@ -12,7 +12,17 @@ export type UiAction =
   | 'quests'
   | 'worldMap'
   | 'keyGuide'
-  | 'debug';
+  | 'debug'
+  | 'hotbar1'
+  | 'hotbar2'
+  | 'hotbar3'
+  | 'hotbar4'
+  | 'hotbar5'
+  | 'hotbar6'
+  | 'hotbar7'
+  | 'hotbar8'
+  | 'hotbar9'
+  | 'hotbar10';
 export type Action = GameplayAction | UiAction;
 
 export const GAMEPLAY_ACTIONS: readonly GameplayAction[] = [
@@ -40,6 +50,16 @@ export const DEFAULT_BINDINGS: Bindings = {
   worldMap: ['KeyM'],
   keyGuide: ['F1'],
   debug: ['F3'],
+  hotbar1: ['Digit1'],
+  hotbar2: ['Digit2'],
+  hotbar3: ['Digit3'],
+  hotbar4: ['Digit4'],
+  hotbar5: ['Digit5'],
+  hotbar6: ['Digit6'],
+  hotbar7: ['Digit7'],
+  hotbar8: ['Digit8'],
+  hotbar9: ['Digit9'],
+  hotbar10: ['Digit0'],
 };
 
 /** Human-readable label for a key code. */

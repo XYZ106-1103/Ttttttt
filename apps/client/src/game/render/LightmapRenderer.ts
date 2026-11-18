@@ -33,6 +33,7 @@ export class LightmapRenderer {
     view: ViewRect,
     ambient: readonly [number, number, number],
     lights: readonly PointLight[],
+    timeSec = 0,
   ): void {
     const x0 = Math.floor(view.left / TILE_SIZE) - MARGIN;
     const y0 = Math.floor(view.top / TILE_SIZE) - MARGIN;
@@ -43,7 +44,7 @@ export class LightmapRenderer {
     const moved = x0 !== this.lastX0 || y0 !== this.lastY0;
     if (moved || this.frame % this.interval === 0) {
       this.grid.resize(w, h);
-      this.grid.compute(this.world, x0, y0, ambient, lights);
+      this.grid.compute(this.world, x0, y0, ambient, lights, timeSec);
       this.upload();
       this.lastX0 = x0;
       this.lastY0 = y0;

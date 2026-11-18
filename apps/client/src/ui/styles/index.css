@@ -411,27 +411,88 @@ body {
 }
 
 /* ---------- HUD: quick slots & menu ----------------------------------------------------------- */
-.pw-quickslots {
+.pw-hotbar-wrap {
   position: absolute;
   left: 50%;
   bottom: 30px;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.pw-hotbar__name {
+  padding: 2px 10px;
+  font-weight: 700;
+  color: var(--gold-hi);
+  text-shadow:
+    0 1px 0 #000,
+    0 0 8px rgba(0, 0, 0, 0.6);
+  animation: pw-fadeout 2.4s ease-out forwards;
+}
+@keyframes pw-fadeout {
+  0%,
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.pw-quickslots {
   display: flex;
   gap: 4px;
   padding: 5px;
 }
 .pw-slot {
   position: relative;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font: inherit;
   background: linear-gradient(180deg, #0c0e1c, #161a30);
   border: 1px solid #000;
   box-shadow:
     0 0 0 1px var(--line),
     inset 0 2px 4px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+.pw-slot:hover {
+  box-shadow:
+    0 0 0 1px var(--line-hi),
+    inset 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.pw-slot.is-selected {
+  box-shadow:
+    0 0 0 2px var(--gold),
+    inset 0 0 10px rgba(232, 196, 106, 0.25);
+}
+.pw-item {
+  position: relative;
+  display: inline-block;
+  pointer-events: none;
+}
+.pw-item img {
+  display: block;
+  image-rendering: pixelated;
+}
+.pw-item__count {
+  position: absolute;
+  right: -4px;
+  bottom: -5px;
+  font-size: 11px;
+  color: #fff;
+  text-shadow:
+    1px 0 0 #000,
+    -1px 0 0 #000,
+    0 1px 0 #000,
+    0 -1px 0 #000;
 }
 .pw-slot__key {
   position: absolute;
+  z-index: 1;
   top: 1px;
   left: 3px;
   font-family: var(--font-small);
@@ -874,4 +935,256 @@ body {
 .pw-error__box h2 {
   margin: 0 0 8px;
   color: var(--gold);
+}
+
+/* ---------- Pickup feed & toast ---------------------------------------------------------------- */
+.pw-feed {
+  position: absolute;
+  right: 14px;
+  bottom: 96px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.pw-feed__line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: rgba(10, 12, 24, 0.66);
+  border: 1px solid rgba(92, 99, 150, 0.5);
+  border-radius: 2px;
+  text-shadow: 0 1px 0 #000;
+  animation: pw-feed 2.6s ease-out forwards;
+}
+@keyframes pw-feed {
+  0% {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  10%,
+  80% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.pw-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 128px;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  color: #ffd2c8;
+  background: rgba(40, 12, 18, 0.78);
+  border: 1px solid #8a3a4e;
+  border-radius: 2px;
+  text-shadow: 0 1px 0 #000;
+  animation: pw-fadeout 1.8s ease-out forwards;
+}
+
+/* ---------- Inventory & crafting --------------------------------------------------------------- */
+.pw-inv {
+  display: flex;
+  gap: 14px;
+}
+.pw-inv__left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pw-inv__label {
+  color: var(--gold);
+  font-weight: 700;
+}
+.pw-inv__grid {
+  display: grid;
+  grid-template-columns: repeat(10, 40px);
+  gap: 3px;
+}
+.pw-inv__grid--bag {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.pw-inv__craft {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.pw-recipes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 248px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+.pw-recipe {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: rgba(7, 8, 15, 0.45);
+  border: 1px solid var(--line);
+}
+.pw-recipe.is-disabled {
+  opacity: 0.55;
+}
+.pw-recipe__out {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  background: #0c0e1c;
+  border: 1px solid #000;
+}
+.pw-recipe__body {
+  flex: 1;
+  min-width: 0;
+}
+.pw-recipe__name {
+  font-weight: 700;
+}
+.pw-recipe__inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.pw-ing {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pw-ing.is-missing {
+  color: #ff8a8a;
+}
+.pw-recipe__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pw-recipe__actions .pw-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+.pw-cursor-stack {
+  position: fixed;
+  z-index: 300;
+  pointer-events: none;
+}
+.pw-tooltip {
+  position: fixed;
+  z-index: 310;
+  max-width: 260px;
+  padding: 8px 10px;
+  pointer-events: none;
+}
+.pw-tooltip__name {
+  font-weight: 700;
+}
+.pw-tooltip__meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.pw-tooltip__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #cfe8ff;
+}
+.pw-tooltip__desc {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+/* ---------- World map -------------------------------------------------------------------------- */
+.pw-map {
+  position: absolute;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 6, 14, 0.6);
+  pointer-events: auto;
+}
+.pw-map__frame {
+  width: min(1400px, 92vw);
+  height: min(760px, 84vh);
+  display: flex;
+  flex-direction: column;
+}
+.pw-map__head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 8px 6px 12px;
+  background: linear-gradient(180deg, #2e3560, #1e2342);
+  border-bottom: 2px solid var(--line);
+}
+.pw-map__head .pw-note {
+  margin: 0;
+  flex: 1;
+}
+.pw-map__viewport {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background: #0b0d16;
+  cursor: grab;
+  touch-action: none;
+}
+.pw-map__viewport:active {
+  cursor: grabbing;
+}
+.pw-map__content {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.pw-map__content canvas {
+  display: block;
+  image-rendering: pixelated;
+}
+.pw-map__marker {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border: 1px solid #000;
+}
+.pw-map__marker.is-you {
+  background: #ffe36a;
+  animation: pw-blink 0.8s steps(2) infinite;
+}
+.pw-map__marker.is-spawn {
+  background: #ff7a5a;
+}
+@keyframes pw-blink {
+  50% {
+    background: #ffffff;
+  }
+}
+.pw-title__confirm {
+  margin: 0 0 4px;
+  line-height: 1.5;
+  text-align: center;
+}
+#game-root canvas {
+  cursor: crosshair;
 }

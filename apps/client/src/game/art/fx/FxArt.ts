@@ -1,6 +1,44 @@
+import { hash2f } from '@world/shared';
 import { hex, withAlpha } from '../color';
 import { PixelCanvas } from '../PixelCanvas';
 import { SpriteAtlasBuilder, type SpriteAtlas } from '../SpriteAtlas';
+import { TILE_RECIPES } from '../tiles/tileArt';
+import { drawTorch } from '../tiles/TilesetGenerator';
+
+export const TORCH_FRAMES = 4;
+export const CRACK_STAGES = 4;
+
+/** Crack overlay for a tile being mined; stage 0 = first hairline, 3 = about to break. */
+function crack(stage: number): PixelCanvas {
+  const pc = new PixelCanvas(16, 16);
+  const ink = withAlpha(hex('#120c10'), 200);
+  const lines: [number, number, number, number][] = [
+    [8, 8, 3, 4],
+    [8, 8, 13, 5],
+    [8, 8, 6, 14],
+    [8, 8, 14, 12],
+    [3, 4, 1, 9],
+    [13, 5, 15, 1],
+    [6, 14, 2, 12],
+    [14, 12, 11, 15],
+  ];
+  const count = 2 + stage * 2;
+  for (let i = 0; i < count && i < lines.length; i++) {
+    const [x0, y0, x1, y1] = lines[i] as [number, number, number, number];
+    const steps = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+    for (let k = 0; k <= steps; k++) {
+      const t = k / steps;
+      const jitter = hash2f(i, k, 9) < 0.3 ? 1 : 0;
+      pc.set(
+        Math.round(x0 + (x1 - x0) * t),
+        Math.round(y0 + (y1 - y0) * t) + jitter * (k % 2),
+        ink,
+      );
+    }
+  }
+  if (stage >= 2) pc.set(8, 8, withAlpha(hex('#000000'), 230));
+  return pc;
+}
 
 /** Small pixel particle sprites (dust, leaves, sparks, fireflies). */
 export function generateFxAtlas(): SpriteAtlas {
@@ -40,11 +78,26 @@ export function generateFxAtlas(): SpriteAtlas {
     fly.set(x, y, withAlpha(hex('#d8f070'), 150));
   }
   b.add('firefly', fly);
+  for (let i = 0; i < CRACK_STAGES; i++) b.add(`crack_${i}`, crack(i));
+  const torch = TILE_RECIPES.torch;
+  if (torch) {
+    for (let f = 0; f < TORCH_FRAMES; f++) {
+      const pc = new PixelCanvas(16, 16);
+      drawTorch(
+        pc,
+        torch.ramp.map((c) => hex(c)),
+        (torch.accent ?? []).map((c) => hex(c)),
+        hex(torch.outline),
+        f,
+      );
+      b.add(`torch_${f}`, pc);
+    }
+  }
   // Generic pixel
   const px = new PixelCanvas(1, 1);
   px.set(0, 0, hex('#ffffff'));
   b.add('pixel', px);
-  return b.build(128);
+  return b.build(256);
 }
 
 /** Smooth radial glow (sampled with linear filtering, tinted at runtime). */

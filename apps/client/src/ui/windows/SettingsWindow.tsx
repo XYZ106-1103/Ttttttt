@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Language, ZoomSetting } from '../../app/settings';
 import { t } from '../../i18n';
 import { Button } from '../components/Button';
@@ -17,8 +18,9 @@ export function SettingsWindow(props: {
   onFocus: () => void;
   zIndex: number;
 }) {
-  const { stores } = useServices();
+  const { stores, bridge } = useServices();
   const s = useStore(stores.settings, (x) => x);
+  const [confirmReset, setConfirmReset] = useState(false);
   const set = stores.settings.set;
   return (
     <Window
@@ -83,6 +85,23 @@ export function SettingsWindow(props: {
                 {l.label}
               </Button>
             ))}
+          </div>
+        </div>
+        <div className="pw-setting">
+          <span>{t('settings.data')}</span>
+          <div className="pw-seg">
+            {confirmReset ? (
+              <>
+                <Button variant="primary" onClick={() => void bridge.resetWorld(false)}>
+                  {t('settings.resetConfirm')}
+                </Button>
+                <Button onClick={() => setConfirmReset(false)}>{t('title.cancel')}</Button>
+              </>
+            ) : (
+              <Button variant="ghost" onClick={() => setConfirmReset(true)}>
+                {t('settings.resetSave')}
+              </Button>
+            )}
           </div>
         </div>
       </div>

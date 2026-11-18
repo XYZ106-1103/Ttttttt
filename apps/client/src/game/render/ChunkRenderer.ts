@@ -26,6 +26,8 @@ export interface ViewRect {
 interface ChunkView {
   rt: Phaser.GameObjects.RenderTexture | null;
   version: number;
+  /** Animated tiles (torches) in this chunk, drawn as sprites by TorchRenderer. */
+  animated: { tx: number; ty: number; id: number }[];
 }
 
 /** Background walls are drawn darker so foreground terrain reads clearly in front of them. */
@@ -42,6 +44,8 @@ export class ChunkRenderer {
   private readonly queued = new Set<number>();
   /** Max chunk bakes per frame. */
   buildBudget = 2;
+  /** Bumped whenever the set of animated tiles may have changed. */
+  animatedVersion = 0;
 
   constructor(
     private readonly scene: Phaser.Scene,
@@ -109,6 +113,7 @@ export class ChunkRenderer {
       const cy = Math.floor(k / this.world.widthChunks);
       if (cx < cx0 - 2 || cx > cx1 + 2 || cy < cy0 - 2 || cy > cy1 + 2) {
         v.rt?.destroy();
+        if (v.animated.length) this.animatedVersion++;
         this.views.delete(k);
       }
     }
@@ -130,13 +135,16 @@ export class ChunkRenderer {
     const k = this.key(cx, cy);
     let v = this.views.get(k);
     if (!v) {
-      v = { rt: null, version: -1 };
+      v = { rt: null, version: -1, animated: [] };
       this.views.set(k, v);
     }
     v.version = chunk.version;
+    const hadAnimated = v.animated.length > 0;
+    v.animated = [];
     if (this.isEmpty(chunk)) {
       v.rt?.destroy();
       v.rt = null;
+      if (hadAnimated) this.animatedVersion++;
       return;
     }
     if (!v.rt) {
@@ -182,6 +190,10 @@ export class ChunkRenderer {
         if (!id) continue;
         const tx = tx0 + lx;
         const ty = ty0 + ly;
+        if (w.tiles.get(id)?.animated) {
+          v.animated.push({ tx, ty, id });
+          continue;
+        }
         const variant = tileVariant(tx, ty, TILE_VARIANTS);
         const frame = tileFrameIndex(ts, id, fgMask(w, tx, ty, id), variant);
         if (frame < 0) continue;
@@ -196,6 +208,12 @@ export class ChunkRenderer {
       }
     }
     rt.endDraw();
+    if (hadAnimated || v.animated.length) this.animatedVersion++;
+  }
+
+  /** All animated tiles in rendered chunks. */
+  *animatedTiles(): Iterable<{ tx: number; ty: number; id: number }> {
+    for (const v of this.views.values()) yield* v.animated;
   }
 
   destroy(): void {

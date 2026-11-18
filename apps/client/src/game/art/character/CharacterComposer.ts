@@ -366,7 +366,11 @@ function scarfTail(
   ribbon(layer, pts, width, width * 0.5, M.scarf);
 }
 
-function composeLayers(a: Appearance, p: Pose): { canvas: PixelCanvas; mat: Int16Array } {
+function composeLayers(
+  a: Appearance,
+  p: Pose,
+  withFrontArm = true,
+): { canvas: PixelCanvas; mat: Int16Array } {
   const px = RIG.pivotX + p.bodyX;
   const py = RIG.hipY + p.bodyY;
   const T = (x: number, y: number): Pt => pt(px + x + p.lean * (-y / 13), py + y);
@@ -708,7 +712,7 @@ function composeLayers(a: Appearance, p: Pose): { canvas: PixelCanvas; mat: Int1
     { layer: backLeg, separate: false },
     { layer: frontLeg, separate: true },
     { layer: torso, separate: true },
-    ...(cloaked ? [{ layer: frontArm, separate: true }] : []),
+    ...(cloaked && withFrontArm ? [{ layer: frontArm, separate: true }] : []),
     { layer: skirt, separate: true },
     {
       layer: head,
@@ -745,7 +749,7 @@ function composeLayers(a: Appearance, p: Pose): { canvas: PixelCanvas; mat: Int1
       },
     },
     { layer: wrap, separate: true },
-    ...(cloaked ? [] : [{ layer: frontArm, separate: true }]),
+    ...(cloaked || !withFrontArm ? [] : [{ layer: frontArm, separate: true }]),
   ];
 
   const canvas = new PixelCanvas(FRAME_SIZE, FRAME_SIZE);
@@ -846,9 +850,48 @@ function finish(canvas: PixelCanvas, mat: Int16Array, a: Appearance): PixelCanva
   return final;
 }
 
-export function composeCharacterFrame(a: Appearance, p: Pose): PixelCanvas {
-  const { canvas, mat } = composeLayers(a, p);
+export function composeCharacterFrame(a: Appearance, p: Pose, withFrontArm = true): PixelCanvas {
+  const { canvas, mat } = composeLayers(a, p, withFrontArm);
   return finish(canvas, mat, a);
+}
+
+/** Frame-space position of the front shoulder joint for a pose (where a held-item arm attaches). */
+export function frontShoulder(p: Pose): Pt {
+  const px = RIG.pivotX + p.bodyX;
+  const py = RIG.hipY + p.bodyY;
+  const x = 2.5;
+  const y = -12.5;
+  return pt(px + x + p.lean * (-y / 13), py + y);
+}
+
+/** Number of discrete arm angles rendered for item use (15° steps). */
+export const ARM_ANGLES = 24;
+/** Shoulder pivot inside an arm frame. */
+export const ARM_PIVOT = FRAME_SIZE / 2;
+/** Distance from shoulder to hand in an arm frame. */
+export const ARM_REACH = 14.5;
+
+/**
+ * The front arm alone at `ARM_ANGLES` angles (frame i points at i·15°, 0° = forward, clockwise),
+ * shoulder at the frame center. Used while swinging tools so the legs keep their own animation.
+ */
+export function composeArmFrames(a: Appearance): PixelCanvas {
+  const strip = new PixelCanvas(FRAME_SIZE * ARM_ANGLES, FRAME_SIZE);
+  const ramps = buildRamps(a);
+  const idle = ANIMATIONS[0]?.frames[0];
+  if (!idle) throw new Error('No idle pose');
+  const ctx: Ctx = { a, p: idle, T: (x, y) => pt(x, y), hx: 0, hy: 0 };
+  for (let i = 0; i < ARM_ANGLES; i++) {
+    const ang = (i / ARM_ANGLES) * Math.PI * 2;
+    const layer = L();
+    const hand = pt(Math.cos(ang) * ARM_REACH, Math.sin(ang) * ARM_REACH);
+    drawArm(ctx, layer, pt(ARM_PIVOT, ARM_PIVOT), hand, false);
+    const canvas = new PixelCanvas(FRAME_SIZE, FRAME_SIZE);
+    const mat = new Int16Array(FRAME_SIZE * FRAME_SIZE).fill(-1);
+    shadeLayerInto(layer, ramps, canvas, mat);
+    strip.blit(finish(canvas, mat, a), i * FRAME_SIZE, 0);
+  }
+  return strip;
 }
 
 export interface SheetFrame {
@@ -857,6 +900,8 @@ export interface SheetFrame {
   readonly y: number;
   readonly w: number;
   readonly h: number;
+  /** Front shoulder position inside the frame. */
+  readonly shoulder?: Pt;
 }
 
 export interface CharacterSheet {
@@ -870,19 +915,21 @@ export interface CharacterSheet {
 export function composeCharacterSheet(
   a: Appearance,
   animations: readonly AnimationDef[] = ANIMATIONS,
+  withFrontArm = true,
 ): CharacterSheet {
   const cols = Math.max(...animations.map((x) => x.frames.length));
   const canvas = new PixelCanvas(cols * FRAME_SIZE, animations.length * FRAME_SIZE);
   const frames: SheetFrame[] = [];
   animations.forEach((anim, row) => {
     anim.frames.forEach((pose, col) => {
-      canvas.blit(composeCharacterFrame(a, pose), col * FRAME_SIZE, row * FRAME_SIZE);
+      canvas.blit(composeCharacterFrame(a, pose, withFrontArm), col * FRAME_SIZE, row * FRAME_SIZE);
       frames.push({
         name: frameName(anim.key, col),
         x: col * FRAME_SIZE,
         y: row * FRAME_SIZE,
         w: FRAME_SIZE,
         h: FRAME_SIZE,
+        shoulder: frontShoulder(pose),
       });
     });
   });

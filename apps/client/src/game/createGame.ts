@@ -25,6 +25,10 @@ export function createGame(parent: HTMLElement, services: GameServices): Phaser.
       } as unknown as Phaser.Types.Core.PipelineConfig,
     },
     input: { keyboard: false, mouse: true, touch: false, gamepad: false },
+    // Report real frame times: the fixed-step simulation catches up after slow frames instead of
+    // Phaser substituting the target delta (which turns frame drops into slow motion and would
+    // desynchronize from the server in PHASE 6).
+    fps: { smoothStep: false },
     scene: [new BootScene(services), new WorldScene(services)],
   });
 }

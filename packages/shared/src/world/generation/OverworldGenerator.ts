@@ -7,7 +7,7 @@ import type { Chunk } from '../Chunk';
 import { localIndex } from '../coords';
 import { TILE } from '../TileRegistry';
 import type { TileReader, WorldGenerator, WorldObject } from '../types';
-import { IslandStamp, PlatformStamp, PostStamp, type TileStamp } from './stamps';
+import { IslandStamp, PlatformStamp, PostStamp, ShaftStamp, type TileStamp } from './stamps';
 import { START_ZONE, type StartZoneLayout, type TerrainShape } from './startZone';
 
 export interface OverworldConfig {
@@ -56,6 +56,10 @@ export class OverworldGenerator implements WorldGenerator {
     blobs: number;
     features: number;
     flora: number;
+    cave: number;
+    cavern: number;
+    copper: number;
+    iron: number;
   };
 
   constructor(config: OverworldConfig) {
@@ -71,6 +75,10 @@ export class OverworldGenerator implements WorldGenerator {
       blobs: deriveSeed(this.seed, 'blobs'),
       features: deriveSeed(this.seed, 'features'),
       flora: deriveSeed(this.seed, 'flora'),
+      cave: deriveSeed(this.seed, 'caves.tunnels'),
+      cavern: deriveSeed(this.seed, 'caves.caverns'),
+      copper: deriveSeed(this.seed, 'ore.copper'),
+      iron: deriveSeed(this.seed, 'ore.iron'),
     };
     this.spawnTileX = Math.floor(this.widthTiles / 2);
 
@@ -180,6 +188,13 @@ export class OverworldGenerator implements WorldGenerator {
         const y = ground - rng.int(4, 6);
         this.stamps.push(new PlatformStamp(cx - (w >> 1), cx + (w >> 1), y));
       }
+      // Natural cave entrances.
+      if (rng.chance(0.3)) {
+        const sx = x0 + rng.int(4, segment - 4);
+        if (Math.abs(sx - this.spawnTileX) > this.zone.radius * 0.6) {
+          this.stamps.push(new ShaftStamp(sx, this.surfaceY(sx), rng.int(24, 46), rng.nextU32()));
+        }
+      }
     }
   }
 
@@ -216,6 +231,25 @@ export class OverworldGenerator implements WorldGenerator {
           else if (fbm2D(tx / 14, ty / 11, this.seeds.blobs + 99, { octaves: 2 }) < -0.48)
             tile = TILE.dirt;
           else tile = TILE.stone;
+        }
+        const depth = ty - s;
+        // Ore veins.
+        if (depth > 6 && (tile === TILE.stone || (tile === TILE.dirt && depth > 10))) {
+          if (fbm2D(tx / 4.2, ty / 4.2, this.seeds.copper, { octaves: 2 }) > 0.44)
+            tile = TILE.copperOre;
+        }
+        if (depth > 30 && tile === TILE.stone) {
+          if (fbm2D(tx / 3.8, ty / 3.8, this.seeds.iron, { octaves: 2 }) > 0.5) tile = TILE.ironOre;
+        }
+        // Caves: thin worm tunnels (ridged noise) and large caverns deeper down.
+        const caveTop = Math.abs(tx - this.spawnTileX) < this.zone.radius ? 24 : 12;
+        if (depth > caveTop) {
+          const widen = clamp((depth - caveTop) / 160, 0, 1) * 0.025;
+          const n = fbm2D(tx / 46, ty / 26, this.seeds.cave, { octaves: 2 });
+          const tunnel = Math.abs(n) < 0.05 + widen;
+          const cavern =
+            depth > 48 && fbm2D(tx / 52, ty / 30, this.seeds.cavern, { octaves: 2 }) > 0.58;
+          if (tunnel || cavern) tile = 0;
         }
         fg[i] = tile;
         if (ty >= s + 3) bg[i] = ty < dirtBottom ? TILE.dirtWall : TILE.stoneWall;
