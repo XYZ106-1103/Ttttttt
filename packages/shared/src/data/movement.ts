@@ -41,7 +41,7 @@ export interface MovementConfig {
 
 export const DEFAULT_MOVEMENT: MovementConfig = {
   bodyWidth: 14,
-  bodyHeight: 38,
+  bodyHeight: 44,
 
   runSpeed: 168,
   groundAccel: 1750,

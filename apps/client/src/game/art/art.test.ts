@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { OBJECT_DEFS, tileRegistry } from '@world/shared';
-import { PLAYER_APPEARANCE, randomAppearance } from './character/appearance';
-import { composeCharacterSheet } from './character/CharacterComposer';
-import { ANIMATIONS, FRAME_SIZE } from './character/poses';
+import { APPEARANCE_PRESETS, PLAYER_APPEARANCE, randomAppearance } from './character/appearance';
+import { composeCharacterSheet, composePortrait } from './character/CharacterComposer';
+import { ANIMATIONS } from './character/poses';
+import { FRAME_SIZE } from './character/rig';
 import { generateObjectAtlas, objectFrameCount, objectFrameName } from './objects/ObjectArt';
 import { PixelCanvas } from './PixelCanvas';
 import {
@@ -25,7 +26,7 @@ describe('CharacterComposer', () => {
     expect(sheet.frames.length).toBe(expected);
     for (const f of sheet.frames) {
       expect(f.w).toBe(FRAME_SIZE);
-      expect(frameOpaque(sheet.canvas, f.x, f.y, f.w, f.h)).toBeGreaterThan(300);
+      expect(frameOpaque(sheet.canvas, f.x, f.y, f.w, f.h)).toBeGreaterThan(450);
     }
   });
 
@@ -37,6 +38,26 @@ describe('CharacterComposer', () => {
         for (let x = 0; x < f.w; x++) if (sheet.canvas.isOpaque(f.x + x, f.y + y)) bottom = y;
       expect(bottom).toBe(FRAME_SIZE - 1);
     }
+  });
+
+  it('never clips parts at the frame edges (all poses, all presets)', () => {
+    for (const a of APPEARANCE_PRESETS) {
+      const sheet = composeCharacterSheet(a);
+      for (const f of sheet.frames) {
+        for (let i = 0; i < FRAME_SIZE; i++) {
+          // Left/right/top borders must stay transparent (the bottom row is the ground line).
+          expect(sheet.canvas.isOpaque(f.x, f.y + i), `${f.name} left`).toBe(false);
+          expect(sheet.canvas.isOpaque(f.x + FRAME_SIZE - 1, f.y + i), `${f.name} right`).toBe(
+            false,
+          );
+          expect(sheet.canvas.isOpaque(f.x + i, f.y), `${f.name} top`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('produces a non-empty portrait', () => {
+    expect(composePortrait(PLAYER_APPEARANCE).opaqueCount()).toBeGreaterThan(150);
   });
 
   it('is deterministic and gives different looks for different seeds', () => {

@@ -8,10 +8,17 @@ import { encodePng } from './lib/png';
 import { PixelCanvas } from '../src/game/art/PixelCanvas';
 import { hex } from '../src/game/art/color';
 import {
+  composeCharacterFrame,
   composeCharacterSheet,
   composePortrait,
 } from '../src/game/art/character/CharacterComposer';
-import { PLAYER_APPEARANCE, randomAppearance } from '../src/game/art/character/appearance';
+import {
+  APPEARANCE_PRESETS,
+  PLAYER_APPEARANCE,
+  randomAppearance,
+} from '../src/game/art/character/appearance';
+import { ANIMATIONS } from '../src/game/art/character/poses';
+import { FRAME_SIZE } from '../src/game/art/character/rig';
 
 const out = process.argv[2] ?? 'preview';
 mkdirSync(out, { recursive: true });
@@ -30,15 +37,23 @@ function save(name: string, pc: PixelCanvas, scale = 4, bg?: string): void {
 const which = process.argv[3] ?? 'all';
 
 if (which === 'all' || which === 'character') {
-  const sheet = composeCharacterSheet(PLAYER_APPEARANCE);
-  save('character_player', sheet.canvas, 4, '#8fb3c9');
+  save('character_player', composeCharacterSheet(PLAYER_APPEARANCE).canvas, 3, '#7d9fb4');
   save('portrait_player', composePortrait(PLAYER_APPEARANCE), 6, '#2a2f45');
-  const crowd = new PixelCanvas(48 * 8, 48 * 2);
+  const idle = ANIMATIONS[0]!.frames[0]!;
+  const presets = new PixelCanvas(FRAME_SIZE * APPEARANCE_PRESETS.length, FRAME_SIZE);
+  APPEARANCE_PRESETS.forEach((a, i) =>
+    presets.blit(composeCharacterFrame(a, idle), i * FRAME_SIZE, 0),
+  );
+  save('character_presets', presets, 4, '#7d9fb4');
+  const crowd = new PixelCanvas(FRAME_SIZE * 8, FRAME_SIZE * 2);
   for (let i = 0; i < 16; i++) {
-    const s = composeCharacterSheet(randomAppearance(1000 + i * 7919));
-    crowd.blitRegion(s.canvas, 0, 0, 48, 48, (i % 8) * 48, Math.floor(i / 8) * 48);
+    crowd.blit(
+      composeCharacterFrame(randomAppearance((i + 1) * 104729), idle),
+      (i % 8) * FRAME_SIZE,
+      Math.floor(i / 8) * FRAME_SIZE,
+    );
   }
-  save('character_crowd', crowd, 3, '#8fb3c9');
+  save('character_crowd', crowd, 3, '#7d9fb4');
 }
 
 import {

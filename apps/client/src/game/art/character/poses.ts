@@ -1,86 +1,24 @@
-/**
- * Animation pose tables. A pose positions the body parts; the composer rasterizes it.
- * All coordinates are in a 48×48 frame for a character facing RIGHT (facing left = flipX).
- *
- * Adding an animation (attack, hit, death, job-specific moves in PHASE 3) means adding a pose
- * list here — no new art files.
- */
-
-export interface Vec {
-  readonly x: number;
-  readonly y: number;
-}
-
-export interface Pose {
-  /** Torso + head + hips offset (body bob). */
-  readonly bodyX: number;
-  readonly bodyY: number;
-  /** Torso top shear in px (positive leans forward). */
-  readonly lean: number;
-  /** Extra head offset relative to the torso. */
-  readonly headY: number;
-  /** Ankle positions in absolute frame coordinates. */
-  readonly frontFoot: Vec;
-  readonly backFoot: Vec;
-  /** Hand positions relative to the respective shoulder. */
-  readonly frontHand: Vec;
-  readonly backHand: Vec;
-  /** Back hair / scarf streaming backwards (px). */
-  readonly sway: number;
-  /** Scarf tail: 0 hangs down, 1 flies horizontally. */
-  readonly scarfLift: number;
-  /** Scarf wave phase (radians). */
-  readonly wave: number;
-  readonly blink: boolean;
-}
-
-export interface AnimationDef {
-  readonly key: string;
-  readonly frames: readonly Pose[];
-  readonly frameRate: number;
-  /** -1 loops forever. */
-  readonly repeat: number;
-}
-
-export const FRAME_SIZE = 48;
-export const RIG = {
-  hipY: 34,
-  frontHipX: 25,
-  backHipX: 22,
-  groundAnkleY: 44,
-  shoulderY: 26,
-  frontShoulderX: 27,
-  backShoulderX: 20,
-  headX: 16,
-  headY: 8,
-  torsoX: 19,
-  torsoY: 23,
-  thigh: 6,
-  shin: 5,
-  upperArm: 4,
-  forearm: 4,
-} as const;
-
-const v = (x: number, y: number): Vec => ({ x, y });
+import { type AnimationDef, type Pose, RIG } from './rig';
+import { pt } from './shapes';
 
 const BASE: Pose = {
   bodyX: 0,
   bodyY: 0,
   lean: 0,
   headY: 0,
-  frontFoot: v(26, RIG.groundAnkleY),
-  backFoot: v(21, RIG.groundAnkleY),
-  frontHand: v(1, 7),
-  backHand: v(-1, 7),
-  sway: 0,
-  scarfLift: 0.1,
+  frontFoot: pt(35, RIG.ankleY),
+  backFoot: pt(29, RIG.ankleY),
+  frontToe: 0,
+  backToe: 0,
+  frontHand: pt(3, 13.5),
+  backHand: pt(-2, 13.5),
+  cloth: 0.12,
   wave: 0,
+  sway: 0,
   blink: false,
 };
 
-function pose(p: Partial<Pose>): Pose {
-  return { ...BASE, ...p };
-}
+const pose = (p: Partial<Pose>): Pose => ({ ...BASE, ...p });
 
 function idle(): Pose[] {
   const out: Pose[] = [];
@@ -89,11 +27,11 @@ function idle(): Pose[] {
     out.push(
       pose({
         bodyY: breathe,
-        frontHand: v(1, 7 - breathe * 0),
-        backHand: v(-1, 7),
-        sway: breathe * 0.5,
-        scarfLift: 0.12,
+        frontHand: pt(3, 13.5 - breathe * 0.5),
+        backHand: pt(-2, 13.5 - breathe * 0.5),
+        cloth: 0.34 + 0.06 * Math.sin((i / 8) * Math.PI * 2),
         wave: (i / 8) * Math.PI * 2,
+        sway: 0.5 + breathe * 0.5,
         blink: i === 6,
       }),
     );
@@ -101,38 +39,44 @@ function idle(): Pose[] {
   return out;
 }
 
-/** Foot offset along a run cycle (phase in [0,1)). Stance pushes back, swing arcs forward. */
-function runFoot(phase: number): Vec {
+/** Ankle offset along a run cycle: short ground contact, long swing (flight phase). */
+function runFoot(phase: number): { x: number; y: number; toe: number } {
   const p = ((phase % 1) + 1) % 1;
-  const stride = 6;
-  if (p < 0.42) {
-    const t = p / 0.42;
-    return v(stride - 2 * stride * t, 0);
+  const stride = 8;
+  if (p < 0.38) {
+    const t = p / 0.38;
+    return { x: stride - 2 * stride * t, y: 0, toe: t > 0.7 ? (t - 0.7) * 90 : 0 };
   }
-  const t = (p - 0.42) / 0.58;
+  const t = (p - 0.38) / 0.62;
   const ease = t * t * (3 - 2 * t);
-  return v(-stride + 2 * stride * ease, -Math.sin(Math.PI * t) * 5);
+  const lift = Math.sin(Math.PI * t) * 7 + (t < 0.4 ? t * 6 : 0);
+  return { x: -stride + 2 * stride * ease, y: -lift, toe: t < 0.5 ? 50 - t * 60 : -12 };
 }
 
 function run(): Pose[] {
   const out: Pose[] = [];
-  const n = 8;
+  const n = 10;
   for (let i = 0; i < n; i++) {
     const ph = i / n;
     const f = runFoot(ph);
     const b = runFoot(ph + 0.5);
-    const bob = Math.cos(4 * Math.PI * (ph - 0.2));
+    const bob = Math.cos(4 * Math.PI * (ph - 0.19));
+    const swing = Math.cos(2 * Math.PI * ph);
     out.push(
       pose({
-        bodyY: Math.round(bob),
-        lean: 1,
-        frontFoot: v(Math.round(RIG.frontHipX + f.x), Math.round(RIG.groundAnkleY + f.y)),
-        backFoot: v(Math.round(RIG.backHipX + b.x), Math.round(RIG.groundAnkleY + b.y)),
-        frontHand: v(Math.round(-f.x * 0.6) + 1, Math.round(6 - Math.abs(f.x) * 0.15)),
-        backHand: v(Math.round(-b.x * 0.6) - 1, Math.round(6 - Math.abs(b.x) * 0.15)),
-        sway: 2 + Math.max(0, bob),
-        scarfLift: 0.95,
+        bodyY: Math.round(bob * 1.2),
+        lean: 3,
+        headY: 0,
+        frontFoot: pt(Math.round(RIG.frontHipX + 1 + f.x), Math.round(RIG.ankleY + f.y)),
+        backFoot: pt(Math.round(RIG.backHipX + 1 + b.x), Math.round(RIG.ankleY + b.y)),
+        frontToe: f.toe,
+        backToe: b.toe,
+        // Arms pump with bent elbows, opposite to the legs.
+        frontHand: pt(-swing * 6 + 2, 10 - Math.abs(swing) * 1.5),
+        backHand: pt(swing * 6 - 1, 10 - Math.abs(swing) * 1.5),
+        cloth: 0.95,
         wave: ph * Math.PI * 4,
+        sway: 3 + Math.max(0, bob),
       }),
     );
   }
@@ -140,28 +84,33 @@ function run(): Pose[] {
 }
 
 export const ANIMATIONS: readonly AnimationDef[] = [
-  { key: 'idle', frames: idle(), frameRate: 5, repeat: -1 },
-  { key: 'run', frames: run(), frameRate: 14, repeat: -1 },
+  { key: 'idle', frames: idle(), frameRate: 6, repeat: -1 },
+  { key: 'run', frames: run(), frameRate: 16, repeat: -1 },
   {
     key: 'jump',
     frames: [
       pose({
-        bodyY: 2,
-        frontFoot: v(27, 44),
-        backFoot: v(20, 44),
-        frontHand: v(2, 5),
-        backHand: v(-3, 5),
-        scarfLift: 0.4,
+        bodyY: 3,
+        lean: 2,
+        frontFoot: pt(37, 59),
+        backFoot: pt(28, 59),
+        backToe: 30,
+        frontHand: pt(4, 9),
+        backHand: pt(-5, 10),
+        cloth: 0.4,
       }),
       pose({
-        bodyY: -1,
-        frontFoot: v(29, 40),
-        backFoot: v(21, 44),
-        frontHand: v(3, -4),
-        backHand: v(-4, -2),
-        sway: 1,
-        scarfLift: 0.55,
+        bodyY: -2,
+        lean: 1,
+        frontFoot: pt(38, 51),
+        backFoot: pt(29, 59),
+        frontToe: -10,
+        backToe: 45,
+        frontHand: pt(5, -6),
+        backHand: pt(-6, 4),
+        cloth: 0.2,
         wave: 1,
+        sway: -1,
       }),
     ],
     frameRate: 16,
@@ -171,14 +120,16 @@ export const ANIMATIONS: readonly AnimationDef[] = [
     key: 'apex',
     frames: [
       pose({
-        bodyY: -1,
-        frontFoot: v(28, 41),
-        backFoot: v(22, 43),
-        frontHand: v(4, 0),
-        backHand: v(-4, 1),
-        sway: 0,
-        scarfLift: 0.35,
+        bodyY: -2,
+        frontFoot: pt(37, 53),
+        backFoot: pt(30, 57),
+        frontToe: 10,
+        backToe: 30,
+        frontHand: pt(7, 2),
+        backHand: pt(-7, 4),
+        cloth: 0.05,
         wave: 2,
+        sway: -2,
       }),
     ],
     frameRate: 1,
@@ -189,23 +140,27 @@ export const ANIMATIONS: readonly AnimationDef[] = [
     frames: [
       pose({
         bodyY: 0,
-        frontFoot: v(27, 43),
-        backFoot: v(21, 42),
-        frontHand: v(4, -4),
-        backHand: v(-4, -5),
-        sway: -1,
-        scarfLift: 0.25,
+        frontFoot: pt(36, 57),
+        backFoot: pt(29, 55),
+        frontToe: 20,
+        backToe: 35,
+        frontHand: pt(7, -4),
+        backHand: pt(-6, -6),
+        cloth: 0,
         wave: 0,
+        sway: -3,
       }),
       pose({
         bodyY: 0,
-        frontFoot: v(27, 44),
-        backFoot: v(22, 43),
-        frontHand: v(5, -3),
-        backHand: v(-3, -5),
-        sway: -1,
-        scarfLift: 0.3,
-        wave: 1.5,
+        frontFoot: pt(36, 58),
+        backFoot: pt(30, 56),
+        frontToe: 15,
+        backToe: 30,
+        frontHand: pt(8, -2),
+        backHand: pt(-5, -7),
+        cloth: 0,
+        wave: 1.6,
+        sway: -3,
       }),
     ],
     frameRate: 10,
@@ -215,20 +170,23 @@ export const ANIMATIONS: readonly AnimationDef[] = [
     key: 'land',
     frames: [
       pose({
-        bodyY: 3,
-        frontFoot: v(28, 44),
-        backFoot: v(20, 44),
-        frontHand: v(3, 4),
-        backHand: v(-3, 4),
-        scarfLift: 0.2,
+        bodyY: 5,
+        lean: 3,
+        frontFoot: pt(38, 59),
+        backFoot: pt(27, 59),
+        backToe: 25,
+        frontHand: pt(5, 8),
+        backHand: pt(-4, 9),
+        cloth: 0.3,
       }),
       pose({
-        bodyY: 1,
-        frontFoot: v(27, 44),
-        backFoot: v(21, 44),
-        frontHand: v(2, 6),
-        backHand: v(-2, 6),
-        scarfLift: 0.15,
+        bodyY: 2,
+        lean: 1,
+        frontFoot: pt(36, 59),
+        backFoot: pt(28, 59),
+        frontHand: pt(3, 11),
+        backHand: pt(-2, 12),
+        cloth: 0.2,
       }),
     ],
     frameRate: 14,
@@ -238,15 +196,16 @@ export const ANIMATIONS: readonly AnimationDef[] = [
     key: 'skid',
     frames: [
       pose({
-        bodyY: 1,
-        lean: -1,
-        frontFoot: v(31, 44),
-        backFoot: v(22, 44),
-        frontHand: v(-1, 5),
-        backHand: v(-4, 4),
-        sway: 3,
-        scarfLift: 0.9,
+        bodyY: 2,
+        lean: -2,
+        frontFoot: pt(41, 59),
+        backFoot: pt(30, 59),
+        frontToe: -15,
+        frontHand: pt(-2, 9),
+        backHand: pt(-6, 8),
+        cloth: 0.9,
         wave: 0.7,
+        sway: 4,
       }),
     ],
     frameRate: 1,

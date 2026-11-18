@@ -94,10 +94,14 @@ apps/client/src
 
 모든 생성기는 DOM 없는 `PixelCanvas`(Uint32 RGBA)에 그리므로 테스트·오프라인 미리보기(`art:preview`)가 가능합니다.
 
-- **캐릭터(paper-doll)**: `Appearance`(피부·머리 모양/색·눈·상의·포인트색·하의·신발·스카프) →
-  `CharacterComposer`가 포즈 테이블(`poses.ts`)을 래스터화. 팔다리는 2-bone IK, 머리는 손으로 찍은
-  템플릿 + 절차적 헤어(5종), 레이어별 내부 구분선 + 외곽선. idle(8)·run(8)·jump·apex·fall·land·skid.
-  `randomAppearance(seed)`로 AI 모험가마다 고유 외형을 에셋 없이 생성합니다(PHASE 4).
+- **캐릭터(paper-doll + IK 리그)**: 64×64 프레임, 신장 약 50px(5.5등신)의 현실적 비율.
+  `Appearance`(피부·헤어 5종·눈·의상 실루엣[롱코트/재킷/판초]·내의·포인트색·하의·신발·모자[고글/후드]·
+  스카프[긴/짧은/복면]·숏 케이프·림라이트 색) → `CharacterComposer`가 포즈 테이블(`poses.ts`)을 래스터화.
+  부위는 머티리얼 ID로 그린 뒤 일괄 셰이딩: 정면 상단 키 라이트, 뒤쪽 실루엣 림라이트, 머티리얼 색으로 물든
+  셀아웃 외곽선, 코트 자락·스카프·케이프의 2차 모션(천 펄럭임). idle(8)·run(10)·jump·apex·fall·land·skid.
+  플레이어 = 승인 디자인 A "방랑자"(`PRESET_WANDERER`). 프리셋 B 탐험가·C 그림자 순례자와
+  `randomAppearance(seed)`로 AI 모험가마다 실루엣까지 다른 외형을 에셋 없이 생성합니다(PHASE 4).
+  표현 기법은 시네마틱 픽셀 액션 게임을 참고했지만 캐릭터 디자인은 오리지널입니다.
 - **타일셋**: 레시피(soil/grass/stone/mossy/platform/planks/wall/beam) × 마스크 16 × 변형 3 + 프린지.
 - **오브젝트**: 참나무·소나무(블롭 캐노피 방향광), 덤불, 풀·긴 풀·꽃(바람 흔들림 4프레임), 바위, 버섯,
   모닥불(6프레임 불꽃), 표지판.
