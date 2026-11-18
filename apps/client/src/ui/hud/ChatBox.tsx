@@ -1,0 +1,136 @@
+import { useEffect, useRef, useState } from 'react';
+import { pushChat } from '../../app/stores';
+import { t } from '../../i18n';
+import { useServices } from '../context';
+import { useStore } from '../hooks/useStore';
+
+/**
+ * Chat & system log. PHASE 1 chat is local only (no server); PHASE 6 routes it through the
+ * WebSocket gateway. Slash commands are developer tools and will be permission-checked
+ * server-side later.
+ */
+export function ChatBox() {
+  const { stores, bridge } = useServices();
+  const messages = useStore(stores.chat, (s) => s.messages);
+  const open = useStore(stores.ui, (s) => s.chatOpen);
+  const playerName = useStore(stores.player, (s) => s.name);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, open]);
+
+  const close = (): void => {
+    setDraft('');
+    stores.ui.set({ chatOpen: false });
+    inputRef.current?.blur();
+  };
+
+  const runCommand = (line: string): void => {
+    const [cmd, ...args] = line.slice(1).trim().split(/\s+/);
+    switch ((cmd ?? '').toLowerCase()) {
+      case 'help':
+        pushChat(stores, 'system', t('chat.help'));
+        break;
+      case 'time': {
+        const h = Number(args[0]);
+        if (!Number.isFinite(h) || h < 0 || h > 24) {
+          pushChat(stores, 'system', t('chat.timeUsage'));
+          break;
+        }
+        bridge.setTimeOfDay(h);
+        const hh = Math.floor(h) % 24;
+        const mm = Math.round((h - Math.floor(h)) * 60);
+        pushChat(
+          stores,
+          'system',
+          t('chat.timeSet', {
+            time: `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`,
+          }),
+        );
+        break;
+      }
+      case 'pos': {
+        const p = bridge.getPlayerTile();
+        if (p) pushChat(stores, 'system', t('chat.pos', { x: p.x, y: p.y }));
+        break;
+      }
+      case 'tp': {
+        const x = Number(args[0]);
+        const y = Number(args[1]);
+        if (!Number.isInteger(x) || !Number.isInteger(y)) {
+          pushChat(stores, 'system', t('chat.tpUsage'));
+          break;
+        }
+        pushChat(
+          stores,
+          'system',
+          bridge.teleport(x, y) ? t('chat.pos', { x, y }) : t('chat.tpBlocked'),
+        );
+        break;
+      }
+      case 'spawn':
+        bridge.spawn();
+        break;
+      case 'seed':
+        pushChat(stores, 'system', t('chat.seed', { seed: stores.world.get().seed }));
+        break;
+      default:
+        pushChat(stores, 'system', t('chat.unknown'));
+    }
+  };
+
+  const submit = (): void => {
+    const text = draft.trim().slice(0, 200);
+    if (text.startsWith('/')) runCommand(text);
+    else if (text) pushChat(stores, 'local', text, playerName);
+    close();
+  };
+
+  return (
+    <div className={`pw-chat ${open ? 'is-open' : ''}`} data-testid="hud-chat">
+      <div className="pw-chat__log pw-panel" ref={logRef}>
+        {messages.slice(open ? -40 : -7).map((m) => (
+          <div key={m.id} className={`pw-chat__line pw-chat__line--${m.channel}`}>
+            {m.channel === 'local' && m.author ? (
+              <span className="pw-chat__author">{m.author}</span>
+            ) : null}
+            {m.channel !== 'local' ? (
+              <span className="pw-chat__tag">
+                [{m.channel === 'notice' ? '★' : t('chat.system')}]
+              </span>
+            ) : null}
+            <span className="pw-chat__text">{m.text}</span>
+          </div>
+        ))}
+      </div>
+      {open ? (
+        <input
+          ref={inputRef}
+          className="pw-chat__input"
+          value={draft}
+          maxLength={200}
+          placeholder={t('chat.placeholder')}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => stores.ui.set({ chatOpen: false })}
+          onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === 'Enter') submit();
+            else if (e.key === 'Escape') close();
+            e.stopPropagation();
+          }}
+          data-testid="chat-input"
+        />
+      ) : (
+        <div className="pw-chat__hint">{t('chat.hint')}</div>
+      )}
+    </div>
+  );
+}
