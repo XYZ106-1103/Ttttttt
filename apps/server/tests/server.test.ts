@@ -186,6 +186,29 @@ describe('game connection', () => {
     expect(pb.gold).toBe(400);
   });
 
+  it('serves views of shared state: society pushes, market, roster, adventurer cards', async () => {
+    await srv.close();
+    srv = await startServer({ adventurers: 4 });
+    const a = await newPlayer(srv.url, 'a@x.dev', 'Alice');
+    const alice = await Bot.join(srv.url, a.token, a.char);
+    const soc = await alice.waitFor((m) => m.t === 'soc');
+    expect(soc.d).toMatchObject({ society: { parties: expect.anything() } });
+    // The market view carries only the caller's own mailbox.
+    srv.world.sim.economy.market.mailbox('pc:999').gold = 50;
+    const eco = (await alice.cmd('economy')).value as { market: { mail: object } };
+    expect(Object.keys(eco.market.mail)).not.toContain('pc:999');
+    const roster = (await alice.cmd('roster')).value as { key: string }[];
+    expect(roster).toHaveLength(4);
+    const first = roster[0]?.key ?? '';
+    const card = (await alice.cmd('adventurer', { key: first })).value as { save: { key: string } };
+    expect(card.save.key).toBe(first);
+    expect(await alice.cmd('adventurer', { key: 'nobody' })).toMatchObject({
+      ok: false,
+      error: 'not_found',
+    });
+    alice.close();
+  });
+
   it('enforces admin-only commands and validates arguments', async () => {
     const a = await newPlayer(srv.url, 'a@x.dev', 'Alice');
     const alice = await Bot.join(srv.url, a.token, a.char);

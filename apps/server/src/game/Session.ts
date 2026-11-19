@@ -55,6 +55,8 @@ export class Session {
   /** Chunk replication bookkeeping: chunk index → change stamp the client has. */
   readonly knownChunks = new Map<number, string>();
   lastPrivate = '';
+  /** Last society view sent (parties, guilds, news, own mailbox). */
+  lastSocial = '';
   readonly messages = new RateLimit(120, 240);
   readonly commands = new RateLimit(20, 40);
   readonly chat = new RateLimit(1, 5);

@@ -29,7 +29,7 @@ export function PartyFrames() {
             </button>
           </div>
           {party
-            .filter((m) => m.key !== 'player')
+            .filter((m) => m.key !== bridge.selfKey())
             .map((m) => (
               <div key={m.key} className={`pw-party__member ${m.alive ? '' : 'is-dead'}`}>
                 <div className="pw-party__name">
@@ -67,7 +67,8 @@ export function PartyFrames() {
               variant="primary"
               testId="invite-accept"
               onClick={() => {
-                bridge.getTown()?.acceptInvite(inv.from);
+                if (inv.purpose === 'player') bridge.answerPlayerInvite(inv.from, true);
+                else void bridge.getTown()?.acceptInvite(inv.from);
                 dismiss(inv.from);
               }}
             >
@@ -75,7 +76,8 @@ export function PartyFrames() {
             </Button>
             <Button
               onClick={() => {
-                bridge.getTown()?.declineInvite(inv.from);
+                if (inv.purpose === 'player') bridge.answerPlayerInvite(inv.from, false);
+                else bridge.getTown()?.declineInvite(inv.from);
                 dismiss(inv.from);
               }}
             >

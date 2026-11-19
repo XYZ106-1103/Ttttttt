@@ -21,14 +21,22 @@ export function ShopWindow(props: Props) {
   const npcId = shop?.npcId ?? 'shopkeeper';
 
   const buy = (itemId: string, count: number): void => {
-    const r = bridge.getTown()?.shopBuy(npcId, itemId, count);
-    if (!r) return;
-    if (r.ok) showToast(stores, t('ex.bought', { item: itemLabel(itemId), count, gold: r.total }));
-    else showToast(stores, failText(r.reason));
+    void bridge
+      .getTown()
+      ?.shopBuy(npcId, itemId, count)
+      .then((r) => {
+        if (r.ok)
+          showToast(stores, t('ex.bought', { item: itemLabel(itemId), count, gold: r.total }));
+        else showToast(stores, failText(r.reason));
+      });
   };
   const sell = (slot: number, count: number): void => {
-    const r = bridge.getTown()?.shopSell(npcId, slot, count);
-    if (r && !r.ok) showToast(stores, failText(r.reason));
+    void bridge
+      .getTown()
+      ?.shopSell(npcId, slot, count)
+      .then((r) => {
+        if (!r.ok) showToast(stores, failText(r.reason));
+      });
   };
 
   return (

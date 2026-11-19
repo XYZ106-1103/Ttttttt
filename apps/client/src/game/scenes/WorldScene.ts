@@ -13,7 +13,10 @@ import {
   type UseOutcome,
 } from '@world/shared';
 import { hasMessage, t } from '../../i18n';
-import { pushChat, pushPickup, showToast } from '../../app/stores';
+import { pushChat, pushPickup, showToast, type TradeOfferView } from '../../app/stores';
+import { localTown, remoteTown, type TownApi } from '../../app/TownApi';
+import type { PlayerActionResult } from '../../app/GameBridge';
+import { closeWindow } from '../../ui/windowActions';
 import { ParallaxBackground } from '../background/ParallaxBackground';
 import { CameraController } from '../camera/CameraController';
 import { computeZoom, snapToPixel } from '../display';
@@ -81,6 +84,9 @@ export class WorldScene extends Phaser.Scene {
   private seenTeleports = 0;
   private netTimer = 0;
   private leaving = false;
+  private townApi: TownApi | null = null;
+  private viewTimer = 0;
+  private viewBusy = false;
   private mode: Mode = 'title';
   private readonly stepper = new FixedStepper(SIM_DT);
   private readonly frameEvents = createFrameEvents();
@@ -166,6 +172,10 @@ export class WorldScene extends Phaser.Scene {
       offline.clock.setTime(TITLE_HOUR);
     }
     const world = this.sim.world;
+    const online = this.online;
+    this.townApi = online
+      ? remoteTown(online.town, (op, args) => online.query(op, args))
+      : localTown(this.sim.town);
 
     // --- Layers & cameras -------------------------------------------------------------------
     this.bgLayer = this.add.layer();
@@ -257,6 +267,21 @@ export class WorldScene extends Phaser.Scene {
       returnToTitle: () => (this.online ? this.leaveOnline(null) : this.returnToTitle()),
       startOnline: (token, id) => this.startOnline(token, id),
       sendChat: (ch, text, to) => this.online?.net.chat(ch, text, to),
+      answerPlayerInvite: (from, accept) => {
+        void this.online?.query('answerPlayer', { from, accept }).then((v) => {
+          const r = v as { ok?: boolean; reason?: string } | null;
+          if (!r?.ok) showToast(this.services.stores, t('fail.unavailable'));
+        });
+      },
+      playerAction: async (op, args): Promise<PlayerActionResult> => {
+        if (!this.online) return { ok: false, reason: 'offline' };
+        const r = await this.online.net.command(op, args);
+        if (!r.ok) return { ok: false, reason: r.error };
+        const v = r.value as { ok?: boolean; reason?: string } | null;
+        if (v && v.ok === false) return { ok: false, reason: String(v.reason ?? 'failed') };
+        return { ...(v ?? {}), ok: true };
+      },
+      selfKey: () => this.sim.selfKey,
       isOnline: () => this.online !== null,
       isAdmin: () => (this.online ? this.online.admin : true),
       setTimeOfDay: (h) => (this.online ? this.online.devTime(h) : this.sim.clock.setTime(h)),
@@ -310,7 +335,7 @@ export class WorldScene extends Phaser.Scene {
       },
       getWorld: () => this.sim.world,
       // Online town services go through the server (PHASE 6-5); never the local replica.
-      getTown: () => (this.mode === 'playing' && !this.online ? this.sim.town : null),
+      getTown: () => (this.mode === 'playing' ? this.townApi : null),
       nameOf: (key) => nameOf(this.sim, key),
       lineText: (speaker, line, params) => spokenText(this.sim, speaker, line, params),
       getExplored: () => this.sim.explored,
@@ -406,11 +431,39 @@ export class WorldScene extends Phaser.Scene {
       this.cameraCtl.snap(this.playerTarget(), this.viewW, this.viewH, this.bounds());
     }
     for (const m of o.drainInbox()) this.onServerMessage(m);
+    this.refreshViews(dt);
     this.netTimer -= dt;
     if (this.netTimer <= 0) {
       this.netTimer = 0.5;
       stores.net.set({ state: o.connection, rtt: Math.round(o.rtt), peers: o.peers().length });
     }
+  }
+
+  /** Fetch market / adventurer views from the server while windows showing them are open. */
+  private refreshViews(dt: number): void {
+    const o = this.online;
+    if (!o || this.viewBusy) return;
+    this.viewTimer -= dt;
+    if (this.viewTimer > 0) return;
+    const { stores } = this.services;
+    const wins = stores.ui.get().windows;
+    const jobs: Promise<void>[] = [];
+    if (wins.includes('exchange') || wins.includes('shop')) jobs.push(o.refreshEconomy());
+    if (wins.includes('roster') || wins.includes('adventurer') || wins.includes('dialogue'))
+      jobs.push(o.refreshRoster());
+    const sel = stores.adventurers.get().selected;
+    if (sel && (wins.includes('adventurer') || wins.includes('dialogue')))
+      jobs.push(o.refreshAdventurer(sel));
+    if (jobs.length === 0) {
+      this.viewTimer = 0.25;
+      return;
+    }
+    this.viewTimer = 2;
+    this.viewBusy = true;
+    void Promise.all(jobs).finally(() => {
+      this.viewBusy = false;
+      this.social.publishAdventurers(true);
+    });
   }
 
   private onServerMessage(m: ServerJson): void {
@@ -424,16 +477,17 @@ export class WorldScene extends Phaser.Scene {
         }
         const text = String(m.text ?? '');
         const name = String(m.name ?? '');
-        if (m.ch === 'party' || m.ch === 'guild') pushChat(stores, 'party', `${name}: ${text}`);
+        if (m.ch === 'party') pushChat(stores, 'party', `${name}: ${text}`);
+        else if (m.ch === 'guild') pushChat(stores, 'guild', text, name);
         else if (m.ch === 'near') pushChat(stores, 'nearby', text, name);
         else if (m.ch === 'whisper')
           pushChat(
             stores,
-            'local',
+            'whisper',
             text,
-            m.from === this.sim.selfKey ? `→ ${String(m.to ?? '')}` : `${name} →`,
+            m.from === this.sim.selfKey ? `→ ${String(m.to ?? '')}` : name,
           );
-        else pushChat(stores, 'local', text, name);
+        else pushChat(stores, 'world', text, name);
         break;
       }
       case 'net':
@@ -451,6 +505,50 @@ export class WorldScene extends Phaser.Scene {
       case 'error':
         pushChat(stores, 'system', t('net.error', { code: String(m.code ?? '') }));
         break;
+      case 'invite': {
+        const from = String(m.from ?? '');
+        const name = String(m.name ?? '');
+        stores.social.set((st) => ({
+          invites: [
+            ...st.invites.filter((i) => i.from !== from),
+            { from, name, purpose: 'player' },
+          ],
+        }));
+        pushChat(stores, 'party', t('player.invitedYou', { name }));
+        break;
+      }
+      case 'tradeRequest':
+        stores.players.set({ request: { from: String(m.from ?? ''), name: String(m.name ?? '') } });
+        break;
+      case 'trade': {
+        const offer = (v: unknown): TradeOfferView => {
+          const o = (v ?? {}) as Partial<TradeOfferView>;
+          return {
+            items: Array.isArray(o.items) ? o.items : [],
+            gold: Number(o.gold) || 0,
+            confirmed: o.confirmed === true,
+          };
+        };
+        if (m.state === 'open') {
+          stores.players.set({
+            request: null,
+            trade: {
+              with: String(m.with ?? ''),
+              withName: String(m.withName ?? ''),
+              mine: offer(m.mine),
+              theirs: offer(m.theirs),
+            },
+          });
+          openWindow(stores, 'playerTrade');
+        } else {
+          const name = stores.players.get().trade?.withName ?? '';
+          stores.players.set({ trade: null });
+          closeWindow(stores, 'playerTrade');
+          showToast(stores, t(`ptrade.${String(m.state)}`, { name }));
+          if (m.state === 'done') pushChat(stores, 'trade', t('ptrade.done', { name }));
+        }
+        break;
+      }
     }
   }
 
@@ -458,7 +556,15 @@ export class WorldScene extends Phaser.Scene {
     if (p.button !== 2 || this.mode !== 'playing') return;
     const wx = this.view.left + p.x / this.zoom;
     const wy = this.view.top + p.y / this.zoom;
-    if (!this.online && this.social.onRightClick(wx, wy)) return;
+    if (this.social.onRightClick(wx, wy)) return;
+    const peer = this.online ? this.combatView.peers.pick(this.sim.peers(), wx, wy) : null;
+    if (peer) {
+      this.services.stores.players.set({
+        menu: { key: peer.key, name: peer.name, level: peer.level, jobId: peer.jobId },
+      });
+      openWindow(this.services.stores, 'player');
+      return;
+    }
     const a = this.combatView.adventurers.pick(this.sim.adventurers.active, wx, wy);
     if (!a) return;
     this.services.stores.adventurers.set({ selected: a.key });

@@ -17,12 +17,30 @@ interface Peer {
   key: string;
   name: string;
   x: number;
+  y: number;
+}
+
+/** Right-click another player until their menu opens (bodies move; NPCs may be in the way). */
+async function openPlayerMenu(page: Page, name: string): Promise<void> {
+  for (let i = 0; i < 12; i++) {
+    const s = await snap(page);
+    const p = (await peers(page)).find((x) => x.name === name);
+    if (p)
+      await page.mouse.click((p.x - s.camera.left) * s.zoom, (p.y - 22 - s.camera.top) * s.zoom, {
+        button: 'right',
+      });
+    if (await page.getByTestId('window-player').isVisible()) return;
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+  }
+  await expect(page.getByTestId('window-player')).toBeVisible();
 }
 
 interface Hooks {
   snapshot(): Snapshot;
   peers(): Peer[];
   tile(tx: number, ty: number): number;
+  count(itemId: string): number;
   stores: { chat: { get(): { messages: { text: string; author: string | null }[] } } };
 }
 
@@ -34,6 +52,8 @@ const peers = (page: Page): Promise<Peer[]> =>
   page.evaluate(() => (window as unknown as Win).__PW__.peers());
 const tileAt = (page: Page, tx: number, ty: number): Promise<number> =>
   page.evaluate(([x, y]) => (window as unknown as Win).__PW__.tile(x, y), [tx, ty] as const);
+const count = (page: Page, itemId: string): Promise<number> =>
+  page.evaluate((id) => (window as unknown as Win).__PW__.count(id), itemId);
 const chatTexts = (page: Page): Promise<string[]> =>
   page.evaluate(() =>
     (window as unknown as Win).__PW__.stores.chat.get().messages.map((m) => m.text),
@@ -113,5 +133,62 @@ test.describe('PROJECT WORLD — PHASE 6 online play', () => {
     await alice.getByTestId('menu-title').click();
     await expect(alice.getByTestId('title-screen')).toBeVisible({ timeout: 20_000 });
     await expect.poll(async () => (await snap(bob)).peers).toBe(0);
+    await alice.context().close();
+    await bob.context().close();
+  });
+
+  test('players party up, trade face to face and whisper', async ({ browser }) => {
+    const tag = String(Date.now() % 100000);
+    const alice = await enterOnline(browser, `Pa${tag}`, 0);
+    const bob = await enterOnline(browser, `Pb${tag}`, 2);
+    await expect
+      .poll(async () => (await peers(alice)).some((p) => p.name === `Pb${tag}`))
+      .toBe(true);
+    // Step apart from the crowd at the spawn so the right-click lands on Bob.
+    await bob.keyboard.down('d');
+    await bob.waitForTimeout(500);
+    await bob.keyboard.up('d');
+    await bob.waitForTimeout(500);
+
+    // Party invitation through the player menu.
+    await openPlayerMenu(alice, `Pb${tag}`);
+    await alice.getByTestId('player-invite').click();
+    await bob.getByTestId('invite-accept').click();
+    await expect(alice.getByTestId('hud-party')).toBeVisible();
+    await expect(bob.getByTestId('hud-party')).toBeVisible();
+
+    // Trade: Alice offers her torches, Bob offers nothing; both confirm.
+    const torchesA = await count(alice, 'torch');
+    const torchesB = await count(bob, 'torch');
+    expect(torchesA).toBeGreaterThan(0);
+    await openPlayerMenu(alice, `Pb${tag}`);
+    await alice.getByTestId('player-trade').click();
+    await bob.getByTestId('trade-accept').click();
+    await expect(alice.getByTestId('window-player-trade')).toBeVisible();
+    await expect(bob.getByTestId('window-player-trade')).toBeVisible();
+    const slot = await alice.evaluate(() =>
+      (
+        window as unknown as {
+          __PW__: { stores: { inventory: { get(): { slots: ({ itemId: string } | null)[] } } } };
+        }
+      ).__PW__.stores.inventory
+        .get()
+        .slots.findIndex((x) => x?.itemId === 'torch'),
+    );
+    await alice.getByTestId(`ptrade-inv-${slot}`).click();
+    await expect(bob.getByTestId('ptrade-theirs')).toContainText('×');
+    await alice.getByTestId('ptrade-confirm').click();
+    await bob.getByTestId('ptrade-confirm').click();
+    await expect(alice.getByTestId('window-player-trade')).toBeHidden();
+    await expect.poll(() => count(bob, 'torch')).toBe(torchesA + torchesB);
+    await expect.poll(() => count(alice, 'torch')).toBe(0);
+
+    // Whisper.
+    await bob.keyboard.press('Enter');
+    await bob.getByTestId('chat-input').fill(`/w Pa${tag} thanks!`);
+    await bob.keyboard.press('Enter');
+    await expect.poll(async () => (await chatTexts(alice)).includes('thanks!')).toBe(true);
+    await alice.context().close();
+    await bob.context().close();
   });
 });

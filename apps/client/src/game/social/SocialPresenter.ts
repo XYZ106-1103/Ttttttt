@@ -214,15 +214,16 @@ export class SocialPresenter {
           near: true,
         };
       }
-      const c = sim.adventurers.byKey(k)?.character;
+      const c = sim.characterByKey(k);
       return {
         key: k,
         name: nameOf(sim, k),
         level: c?.level ?? 1,
         jobId: c?.jobId ?? 'novice',
-        hp: Math.ceil(c?.hp ?? 0),
+        hp: Math.ceil(c?.hp ?? 1),
         maxHp: c?.stats.maxHp ?? 1,
-        alive: c?.alive ?? false,
+        // Players out of view: shown as alive (their state is not replicated that far).
+        alive: c?.alive ?? true,
         leader: party?.leader === k,
         near: c ? near(c.motor.x) : false,
       };
@@ -237,7 +238,7 @@ export class SocialPresenter {
         leaderName: nameOf(sim, g.leader),
         fame: g.fame,
         members: g.members.map((k) => {
-          const c = k === sim.selfKey ? sim.player : sim.adventurers.byKey(k)?.character;
+          const c = sim.characterByKey(k);
           return {
             key: k,
             name: nameOf(sim, k),

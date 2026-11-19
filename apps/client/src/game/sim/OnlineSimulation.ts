@@ -2,6 +2,7 @@ import {
   type ActionIntent,
   type ActorEvent,
   type Adventurer,
+  type AdventurerSave,
   type AdventurerDirector,
   applyPrivate,
   applyVitals,
@@ -802,6 +803,9 @@ export class OnlineSimulation implements ClientSim {
       case 'me':
         this.onPrivate(m.d as PrivateFull);
         break;
+      case 'soc':
+        this.applySociety(m.d);
+        break;
       case 'chunk':
         try {
           this.world.applyChunkData(m.d as Parameters<World['applyChunkData']>[0]);
@@ -953,6 +957,121 @@ export class OnlineSimulation implements ClientSim {
     this.lastSnapAt = performance.now();
     for (const c of w.explored) this.local.explored.add(c);
     this.inbox.push({ t: 'net', state: 'online' });
+  }
+
+  // --- Shared state views (parties, guilds, market, adventurers) ---------------------------
+
+  /** Send a command; resolves with the server's value, or null when it failed. */
+  async query(op: string, args: Record<string, unknown> = {}): Promise<unknown> {
+    const r = await this.net.command(op, args);
+    return r.ok ? r.value : null;
+  }
+
+  /** Parties, guilds, news and the player's own mailbox (pushed by the server on change). */
+  private applySociety(raw: unknown): void {
+    const d = raw as {
+      society?: unknown;
+      mail?: { gold?: number; items?: unknown; sales?: unknown };
+    };
+    if (!d || typeof d !== 'object') return;
+    try {
+      this.core.society.load(d.society, () => true);
+      const box = this.core.economy.market.mailbox(this.selfKey);
+      box.gold = Math.max(0, Number(d.mail?.gold) || 0);
+      box.items = Array.isArray(d.mail?.items) ? (d.mail.items as typeof box.items) : [];
+      box.sales = Array.isArray(d.mail?.sales) ? (d.mail.sales as typeof box.sales) : [];
+    } catch (err) {
+      console.warn('bad society view', err);
+    }
+  }
+
+  /** Market listings, prices and shop stock (fetched while a trading window is open). */
+  async refreshEconomy(): Promise<void> {
+    const v = (await this.query('economy')) as {
+      prices?: unknown;
+      market?: unknown;
+      shops?: Record<string, unknown>;
+    } | null;
+    if (!v) return;
+    try {
+      this.core.economy.load({ ...v, ledger: { created: 0, destroyed: 0 } });
+    } catch (err) {
+      console.warn('bad economy view', err);
+    }
+  }
+
+  /** Every adventurer's public state and relation to this player (roster window). */
+  async refreshRoster(): Promise<void> {
+    const list = (await this.query('roster')) as
+      | {
+          key: string;
+          level: number;
+          job: string;
+          alive: boolean;
+          hp: number;
+          maxHp: number;
+          x: number;
+          action: string;
+          activity: string;
+          rel: Record<string, number> | null;
+        }[]
+      | null;
+    if (!Array.isArray(list)) return;
+    for (const e of list) {
+      const a = this.core.adventurers.byKey(e.key);
+      if (!a) continue;
+      const c = a.character;
+      if (!this.advRecs.has(c.id)) {
+        // Not in view: take the server's word for everything (mirrored ones come in snapshots).
+        c.level = e.level;
+        c.progress = { ...c.progress, level: e.level };
+        c.jobId = e.job;
+        c.alive = e.alive;
+        c.hp = e.hp;
+        setMaxHp(c, e.maxHp);
+        c.motor.x = e.x;
+        c.prevX = e.x;
+        a.action = e.action as Adventurer['action'];
+      }
+      a.activity = e.activity as Adventurer['activity'];
+      if (e.rel)
+        a.memory.relations.set(this.selfKey, { ...e.rel } as unknown as NonNullable<
+          ReturnType<typeof a.memory.relations.get>
+        >);
+      else a.memory.relations.delete(this.selfKey);
+    }
+  }
+
+  /** One adventurer in full (inspection card): memories, goal, relations, scores. */
+  async refreshAdventurer(key: string): Promise<void> {
+    const v = (await this.query('adventurer', { key })) as {
+      save: AdventurerSave;
+      scores: Adventurer['scores'];
+      listen: number;
+    } | null;
+    const a = this.core.adventurers.byKey(key);
+    if (!v || !a) return;
+    const c = a.character;
+    const mirrored = this.advRecs.has(c.id);
+    const keep = { x: c.motor.x, y: c.motor.y, prevX: c.prevX, prevY: c.prevY, alive: c.alive };
+    try {
+      a.load(v.save);
+    } catch (err) {
+      console.warn('bad adventurer view', err);
+      return;
+    }
+    if (mirrored) {
+      // Snapshots own position and liveness of adventurers in view.
+      c.motor.x = keep.x;
+      c.motor.y = keep.y;
+      c.prevX = keep.prevX;
+      c.prevY = keep.prevY;
+      c.alive = keep.alive;
+      const r = this.advRecs.get(c.id);
+      if (r) r.held = c.inventory.get(c.selectedSlot)?.itemId ?? '';
+    }
+    a.scores = v.scores ?? {};
+    a.listenUntil = this.time + (Number(v.listen) || 0);
   }
 
   /** Messages for the UI since the last call. */

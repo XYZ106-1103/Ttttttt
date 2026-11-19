@@ -328,12 +328,29 @@ export class WorldServer {
     }
   }
 
+  /**
+   * Parties, guilds and news (public) plus each player's own mailbox, sent when they change.
+   * Market listings and adventurer details are larger and fetched on demand instead.
+   */
+  private syncSociety(): void {
+    const society = JSON.stringify(this.sim.society.toJSON());
+    for (const s of this.sessions) {
+      if (s.state !== 'playing') continue;
+      const mail = this.sim.economy.market.peekMail(s.key);
+      const json = `{"society":${society},"mail":${JSON.stringify(mail ?? null)}}`;
+      if (json === s.lastSocial) continue;
+      s.lastSocial = json;
+      s.transport.sendText(`{"t":"soc","d":${json}}`);
+    }
+  }
+
   // --- Housekeeping: chunk sync, saving, journal ---------------------------------------------
 
   private housekeeping(): void {
     const tick = this.sim.tickCount;
     if (tick % 30 === 0)
       for (const s of this.sessions) if (s.state === 'playing') this.syncChunks(s);
+    if (tick % 30 === 15) this.syncSociety();
     const now = Date.now();
     if (this.journalBuf.length > 0 && tick % 60 === 0) {
       const batch = this.journalBuf;

@@ -107,4 +107,35 @@ describe('netcode: prediction and reconciliation', () => {
     a.close();
     b.close();
   });
+
+  it('keeps the replica parties and market in sync with the server', async () => {
+    const a = await join('pa@x.dev', 'PartyA');
+    const b = await join('pb@x.dev', 'PartyB');
+    // Alice invites Bob; Bob accepts (as the UI does through the bridge).
+    expect(await a.query('invitePlayer', { name: 'PartyB' })).toMatchObject({ ok: true });
+    for (let i = 0; i < 50 && !b.inbox.some((m) => m.t === 'invite'); i++) await sleep(20);
+    expect(await b.query('answerPlayer', { from: a.selfKey, accept: true })).toMatchObject({
+      joined: true,
+    });
+    // The server pushes the society view: both replicas see the party.
+    for (let i = 0; i < 100 && !a.society.parties.same(a.selfKey, b.selfKey); i++) await sleep(20);
+    expect(a.society.parties.same(a.selfKey, b.selfKey)).toBe(true);
+    expect(b.society.parties.same(a.selfKey, b.selfKey)).toBe(true);
+    // A listing on the server shows up in the replica's market after a refresh.
+    const p = srv.world.sim.playerOf(a.selfKey);
+    p?.inventory.add('iron_ore', 5);
+    srv.world.sim.economy.market.list(
+      { key: a.selfKey, inventory: p!.inventory, gold: 0 } as never,
+      'iron_ore',
+      5,
+      30,
+      srv.world.sim.time,
+    );
+    await b.refreshEconomy();
+    expect(
+      b.economy.market.bySeller(a.selfKey).some((l) => l.itemId === 'iron_ore' && l.price === 30),
+    ).toBe(true);
+    a.close();
+    b.close();
+  });
 });

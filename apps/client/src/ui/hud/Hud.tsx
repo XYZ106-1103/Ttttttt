@@ -9,6 +9,7 @@ import { Minimap } from './Minimap';
 import { Hotbar } from './Hotbar';
 import { PartyFrames } from './PartyFrames';
 import { PickupFeed } from './PickupFeed';
+import { PlayerPrompts } from './PlayerPrompts';
 import { RegionBanner } from './RegionBanner';
 import { StatusPanel } from './StatusPanel';
 
@@ -18,6 +19,7 @@ export function Hud() {
       <CombatOverlay />
       <StatusPanel />
       <PartyFrames />
+      <PlayerPrompts />
       <BuffBar />
       <BossBar />
       <Minimap />

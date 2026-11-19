@@ -7,7 +7,12 @@ import type {
   StatKey,
   World,
 } from '@world/shared';
-import type { TownServices } from '@world/shared';
+import type { TownApi } from './TownApi';
+
+/** Result of a player ↔ player request (invite, trade step). */
+export type PlayerActionResult =
+  | { readonly ok: true; readonly [k: string]: unknown }
+  | { readonly ok: false; readonly reason: string };
 
 /**
  * Commands the UI may send to the game, and read-only queries it may make.
@@ -20,6 +25,10 @@ export interface GameCommands {
   startOnline(token: string, characterId: number): Promise<string | null>;
   /** Send a chat message to the server (online play). */
   sendChat(channel: ChatChannelId, text: string, to?: string): void;
+  /** Answer another player's party invitation (online). */
+  answerPlayerInvite(fromKey: string, accept: boolean): void;
+  /** Player ↔ player requests and trades (online). Resolve with the server's result. */
+  playerAction(op: string, args: Record<string, unknown>): Promise<PlayerActionResult>;
   /** Developer command (/time). PHASE 6 restricts to admins server-side. */
   setTimeOfDay(hours: number): void;
   /** Developer command (/tp, /spawn). Places the player's feet on top of tile (x, y). */
@@ -58,7 +67,9 @@ export interface GameQueries {
   /** Chunk indices seen by the player (world map fog of war). */
   getExplored(): ReadonlySet<number>;
   /** Town services (shop, exchange, talking, parties, guilds) — validated commands only. */
-  getTown(): TownServices | null;
+  getTown(): TownApi | null;
+  /** Society key of the local player. */
+  selfKey(): string;
   /** Name of a character key ('player' or an adventurer) in the current language. */
   nameOf(key: string): string;
   /** Text of a conversation line spoken by an adventurer (or an NPC line key). */
@@ -92,6 +103,15 @@ export class GameBridge implements GameCommands, GameQueries {
   }
   sendChat(channel: ChatChannelId, text: string, to?: string): void {
     this.impl?.sendChat(channel, text, to);
+  }
+  answerPlayerInvite(fromKey: string, accept: boolean): void {
+    this.impl?.answerPlayerInvite(fromKey, accept);
+  }
+  async playerAction(op: string, args: Record<string, unknown>): Promise<PlayerActionResult> {
+    return this.impl ? this.impl.playerAction(op, args) : { ok: false, reason: 'offline' };
+  }
+  selfKey(): string {
+    return this.impl?.selfKey() ?? 'player';
   }
   isOnline(): boolean {
     return this.impl?.isOnline() ?? false;
@@ -162,7 +182,7 @@ export class GameBridge implements GameCommands, GameQueries {
   setMonsters(enabled: boolean): void {
     this.impl?.setMonsters(enabled);
   }
-  getTown(): TownServices | null {
+  getTown(): TownApi | null {
     return this.impl?.getTown() ?? null;
   }
   nameOf(key: string): string {

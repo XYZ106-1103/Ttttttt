@@ -17,6 +17,8 @@ import { SkillWindow } from './SkillWindow';
 import { WorldMapWindow } from './WorldMapWindow';
 import { KeyGuideWindow } from './KeyGuideWindow';
 import { SettingsWindow } from './SettingsWindow';
+import { PlayerTradeWindow } from './PlayerTradeWindow';
+import { PlayerWindow } from './PlayerWindow';
 
 type WindowComponent = (props: {
   onClose: () => void;
@@ -39,6 +41,8 @@ const COMPONENTS: Record<WindowId, WindowComponent> = {
   exchange: ExchangeWindow,
   trade: TradeWindow,
   guild: GuildWindow,
+  player: PlayerWindow,
+  playerTrade: PlayerTradeWindow,
 };
 
 /** Renders open windows in focus order (last = top). */

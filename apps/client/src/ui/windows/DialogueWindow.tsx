@@ -50,17 +50,25 @@ export function DialogueWindow(props: Props) {
       setLog([{ who: t(`npc.${target.id}`), text: t(`npc.${target.id}.hello`, params) }]);
       return;
     }
-    const town = bridge.getTown();
-    const r = town?.talk(target.key);
-    if (!r) {
-      setGone(true);
-      setLog([]);
-      return;
-    }
-    setLog([
-      { who: bridge.nameOf(target.key), text: bridge.lineText(target.key, r.line, r.params) },
-    ]);
+    let live = true;
+    setLog([]);
     stores.adventurers.set({ selected: target.key });
+    void bridge
+      .getTown()
+      ?.talk(target.key)
+      .then((r) => {
+        if (!live) return;
+        if (!r) {
+          setGone(true);
+          return;
+        }
+        setLog([
+          { who: bridge.nameOf(target.key), text: bridge.lineText(target.key, r.line, r.params) },
+        ]);
+      });
+    return () => {
+      live = false;
+    };
   }, [target, seq, bridge, stores]);
 
   // Keep the adventurer listening while the window is open; notice when they leave.
@@ -77,19 +85,26 @@ export function DialogueWindow(props: Props) {
   const say = useCallback(
     (mine: string, req: PlayerRequest) => {
       if (target?.kind !== 'adventurer') return;
-      const r = bridge.getTown()?.ask(target.key, req);
-      if (!r) {
-        setGone(true);
-        return;
-      }
-      setLog((l) =>
-        [
-          ...l,
-          { who: t('dlg.you'), text: mine, mine: true },
-          { who: bridge.nameOf(target.key), text: bridge.lineText(target.key, r.line, r.params) },
-        ].slice(-6),
-      );
-      if (req === 'bye') window.setTimeout(() => closeWindow(stores, 'dialogue'), 700);
+      void bridge
+        .getTown()
+        ?.ask(target.key, req)
+        .then((r) => {
+          if (!r) {
+            setGone(true);
+            return;
+          }
+          setLog((l) =>
+            [
+              ...l,
+              { who: t('dlg.you'), text: mine, mine: true },
+              {
+                who: bridge.nameOf(target.key),
+                text: bridge.lineText(target.key, r.line, r.params),
+              },
+            ].slice(-6),
+          );
+          if (req === 'bye') window.setTimeout(() => closeWindow(stores, 'dialogue'), 700);
+        });
     },
     [target, bridge, stores],
   );
@@ -123,17 +138,20 @@ export function DialogueWindow(props: Props) {
           label: t('dlg.found', { cost: GUILD_FOUND_COST }),
           testId: 'dlg-found',
           onClick: () => {
-            const r = bridge.getTown()?.foundGuild();
-            if (!r) return;
-            if (r.ok) {
-              showToast(
-                stores,
-                t('guild.founded', {
-                  guild: getLanguage() === 'en' ? r.guild.name.en : r.guild.name.ko,
-                }),
-              );
-              openWindow(stores, 'guild');
-            } else showToast(stores, failText(r.reason, { level: GUILD_FOUND_LEVEL }));
+            void bridge
+              .getTown()
+              ?.foundGuild()
+              .then((r) => {
+                if (r.ok) {
+                  showToast(
+                    stores,
+                    t('guild.founded', {
+                      guild: getLanguage() === 'en' ? r.guild.name.en : r.guild.name.ko,
+                    }),
+                  );
+                  openWindow(stores, 'guild');
+                } else showToast(stores, failText(r.reason, { level: GUILD_FOUND_LEVEL }));
+              });
           },
         });
       options.push({

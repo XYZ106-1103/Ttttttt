@@ -31,7 +31,7 @@ export function TradeWindow(props: Props) {
     if (!key) return;
     const town = bridge.getTown();
     town?.keepListening(key);
-    setOffers(town?.offers(key) ?? null);
+    void town?.offers(key).then((o) => setOffers(o ?? null));
   }, [key, bridge]);
 
   useEffect(() => {
@@ -47,12 +47,13 @@ export function TradeWindow(props: Props) {
 
   const act = (kind: 'buy' | 'sell', o: Offer, count: number): void => {
     const town = bridge.getTown();
-    const r =
+    const p =
       kind === 'buy' ? town?.buyFrom(key, o.itemId, count) : town?.sellTo(key, o.itemId, count);
-    if (!r) return;
-    if (r.ok) showToast(stores, t('trade.done', { item: itemLabel(o.itemId), count }));
-    else showToast(stores, failText(r.reason));
-    refresh();
+    void p?.then((r) => {
+      if (r.ok) showToast(stores, t('trade.done', { item: itemLabel(o.itemId), count }));
+      else showToast(stores, failText(r.reason));
+      refresh();
+    });
   };
 
   return (

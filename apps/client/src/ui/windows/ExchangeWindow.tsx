@@ -45,11 +45,14 @@ export function ExchangeWindow(props: Props) {
   const mine = eco.listings.filter((l) => l.mine);
 
   const buy = (id: number, itemId: string, n: number): void => {
-    const r = bridge.getTown()?.marketBuy(id, n);
-    if (!r) return;
-    if (r.ok)
-      showToast(stores, t('ex.bought', { item: itemLabel(itemId), count: n, gold: r.total }));
-    else showToast(stores, failText(r.reason));
+    void bridge
+      .getTown()
+      ?.marketBuy(id, n)
+      .then((r) => {
+        if (r.ok)
+          showToast(stores, t('ex.bought', { item: itemLabel(itemId), count: n, gold: r.total }));
+        else showToast(stores, failText(r.reason));
+      });
   };
 
   const choose = (slot: number, st: ItemStack): void => {
@@ -60,12 +63,16 @@ export function ExchangeWindow(props: Props) {
   const picked = pick !== null ? (slots[pick] ?? null) : null;
   const list = (): void => {
     if (pick === null || !picked) return;
-    const r = bridge.getTown()?.marketList(pick, count, price);
-    if (!r) return;
-    if (r.ok) {
-      showToast(stores, t('ex.listed', { item: itemLabel(picked.itemId), count }));
-      setPick(null);
-    } else showToast(stores, failText(r.reason, { n: eco.maxListings }));
+    const itemId = picked.itemId;
+    void bridge
+      .getTown()
+      ?.marketList(pick, count, price)
+      .then((r) => {
+        if (r.ok) {
+          showToast(stores, t('ex.listed', { item: itemLabel(itemId), count }));
+          setPick(null);
+        } else showToast(stores, failText(r.reason, { n: eco.maxListings }));
+      });
   };
 
   return (
@@ -219,8 +226,12 @@ export function ExchangeWindow(props: Props) {
                 disabled={eco.mailGold <= 0 && eco.mailItems <= 0}
                 testId="ex-collect"
                 onClick={() => {
-                  const got = bridge.getTown()?.marketCollect();
-                  if (got) showToast(stores, t('ex.collected', { gold: got.gold }));
+                  void bridge
+                    .getTown()
+                    ?.marketCollect()
+                    .then((got) => {
+                      if (got) showToast(stores, t('ex.collected', { gold: got.gold }));
+                    });
                 }}
               >
                 {t('ex.collect', { gold: eco.mailGold, items: eco.mailItems })}
@@ -239,8 +250,12 @@ export function ExchangeWindow(props: Props) {
                   <span className="pw-price">{l.price}G</span>
                   <Button
                     onClick={() => {
-                      const r = bridge.getTown()?.marketCancel(l.id);
-                      if (r && !r.ok) showToast(stores, failText(r.reason));
+                      void bridge
+                        .getTown()
+                        ?.marketCancel(l.id)
+                        .then((r) => {
+                          if (!r.ok) showToast(stores, failText(r.reason));
+                        });
                     }}
                   >
                     {t('ex.cancel')}

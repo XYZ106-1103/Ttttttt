@@ -128,7 +128,17 @@ export interface WorldState {
   readonly seed: number;
 }
 
-export type ChatChannel = 'system' | 'local' | 'notice' | 'nearby' | 'news' | 'party' | 'trade';
+export type ChatChannel =
+  | 'system'
+  | 'local'
+  | 'notice'
+  | 'nearby'
+  | 'news'
+  | 'party'
+  | 'trade'
+  | 'world'
+  | 'guild'
+  | 'whisper';
 
 export interface ChatMessage {
   readonly id: number;
@@ -222,11 +232,15 @@ export type WindowId =
   | 'inventory'
   | 'worldMap'
   | 'skills'
-  | 'jobAdvance';
+  | 'jobAdvance'
+  | 'player'
+  | 'playerTrade';
 
 export interface UiState {
   readonly windows: readonly WindowId[];
   readonly chatOpen: boolean;
+  /** Text to put in the chat input when it opens (e.g. "/w name "). */
+  readonly chatDraft: string | null;
   readonly menuOpen: boolean;
   readonly debugVisible: boolean;
   /** Region banner shown when entering a region. */
@@ -358,6 +372,29 @@ export interface DialogueState {
   readonly seq: number;
 }
 
+export interface TradeOfferView {
+  readonly items: readonly ItemStack[];
+  readonly gold: number;
+  readonly confirmed: boolean;
+}
+
+/** Other players (online): the inspected player, a pending trade request, an open trade. */
+export interface PlayersState {
+  readonly menu: {
+    readonly key: string;
+    readonly name: string;
+    readonly level: number;
+    readonly jobId: string;
+  } | null;
+  readonly request: { readonly from: string; readonly name: string } | null;
+  readonly trade: {
+    readonly with: string;
+    readonly withName: string;
+    readonly mine: TradeOfferView;
+    readonly theirs: TradeOfferView;
+  } | null;
+}
+
 /** Online connection status (offline play: mode 'offline'). */
 export interface NetState {
   readonly mode: 'offline' | 'online';
@@ -372,6 +409,7 @@ export interface NetState {
 export interface Stores {
   readonly app: Store<AppState>;
   readonly net: Store<NetState>;
+  readonly players: Store<PlayersState>;
   readonly player: Store<PlayerState>;
   readonly world: Store<WorldState>;
   readonly chat: Store<ChatState>;
@@ -391,6 +429,7 @@ const ZERO_STATS = { str: 0, dex: 0, int: 0, vit: 0, luk: 0 };
 
 export function createStores(): Stores {
   return {
+    players: createStore<PlayersState>({ menu: null, request: null, trade: null }),
     net: createStore<NetState>({
       mode: 'offline',
       state: 'online',
@@ -452,6 +491,7 @@ export function createStores(): Stores {
     ui: createStore<UiState>({
       windows: [],
       chatOpen: false,
+      chatDraft: null,
       menuOpen: false,
       debugVisible: false,
       banner: null,

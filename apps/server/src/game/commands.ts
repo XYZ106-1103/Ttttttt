@@ -194,7 +194,48 @@ export const COMMANDS: Readonly<Record<string, Handler>> = {
   foundGuild: (c) => {
     const r = c.session.town.foundGuild();
     if (r.ok) c.journal('guild_found', { guild: r.guild.id });
-    return r.ok ? { ok: true, guild: r.guild.id, name: r.guild.name } : r;
+    return r.ok ? { ok: true, guild: { id: r.guild.id, name: r.guild.name } } : r;
+  },
+  // --- Read-only views (the client's replica of shared state) -------------------------------
+  /** Market listings, reference prices, shop stock and the caller's own mailbox. */
+  economy: (c) => {
+    const eco = c.sim.economy;
+    const market = eco.market.toJSON() as unknown as Record<string, unknown>;
+    const own = eco.market.peekMail(c.session.key);
+    const shops: Record<string, unknown> = {};
+    for (const [id, s] of eco.shops) shops[id] = s.toJSON();
+    return {
+      prices: eco.prices.toJSON(),
+      market: { ...market, mail: own ? { [c.session.key]: own } : {} },
+      shops,
+    };
+  },
+  /** Every adventurer's public state, and how each one feels about the caller. */
+  roster: (c) =>
+    c.sim.adventurers.all.map((a) => {
+      const ch = a.character;
+      return {
+        key: a.key,
+        level: ch.level,
+        job: ch.jobId,
+        alive: ch.alive,
+        hp: Math.ceil(ch.hp),
+        maxHp: ch.stats.maxHp,
+        x: Math.round(ch.motor.x),
+        action: a.action,
+        activity: a.activity,
+        rel: a.memory.relations.get(c.session.key) ?? null,
+      };
+    }),
+  /** One adventurer in full (the inspection card): memories, goal, relations, utility scores. */
+  adventurer: (c, a) => {
+    const adv = c.sim.adventurers.byKey(str(a, 'key'));
+    if (!adv) throw new CommandError('not_found');
+    return {
+      save: adv.toJSON(),
+      scores: adv.scores,
+      listen: Math.max(0, adv.listenUntil - c.sim.time),
+    };
   },
   leaveGuild: (c) => ok(c.session.town.leaveGuild()),
   // --- Players together ----------------------------------------------------------------------
