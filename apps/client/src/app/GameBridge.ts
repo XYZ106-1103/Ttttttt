@@ -1,5 +1,5 @@
 import type { CraftResult, EquipFail, EquipSlotId, LearnFail, StatKey, World } from '@world/shared';
-import type { TownServices } from '../game/sim/TownServices';
+import type { TownServices } from '@world/shared';
 
 /**
  * Commands the UI may send to the game, and read-only queries it may make.

@@ -155,10 +155,10 @@ describe('director', () => {
       safeTo: sx + 34,
       maxActive: 6,
     });
-    d.updateTiers(sx * 16, world.surfaceY(sx) * 16, 0, true);
+    d.updateTiers([{ x: sx * 16, y: world.surfaceY(sx) * 16 }], 0, true);
     expect(d.active.length).toBe(6);
     for (const a of d.active) expect(combat.combatants.has(a.character.id)).toBe(true);
-    d.updateTiers((sx + 400) * 16, world.surfaceY(sx + 400) * 16, 1, true);
+    d.updateTiers([{ x: (sx + 400) * 16, y: world.surfaceY(sx + 400) * 16 }], 1, true);
     expect(d.active.length).toBe(0);
     expect([...combat.combatants.values()].filter((c) => c.kind === 'adventurer').length).toBe(0);
   });

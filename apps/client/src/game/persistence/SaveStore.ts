@@ -1,61 +1,15 @@
-import type {
-  AdventurerSave,
-  BaseStats,
-  EquipmentData,
-  InventoryData,
-  SerializedChunk,
+import {
+  type AdventurerSave,
+  type PlayerSave,
+  type SaveBundle,
+  SAVE_VERSION,
+  type SerializedChunk,
+  type WorldMeta,
+  type WorldSocietySave,
 } from '@world/shared';
 
-/** v2 (PHASE 3) adds progression, job, skills and equipment; v1 saves load with defaults. */
-export const SAVE_VERSION = 3;
-
-export interface WorldMeta {
-  readonly v: number;
-  readonly worldId: string;
-  readonly seed: number;
-  readonly timeOfDay: number;
-  readonly day: number;
-  readonly savedAt: number;
-}
-
-export interface PlayerSave {
-  readonly v: number;
-  readonly x: number;
-  readonly y: number;
-  readonly inventory: InventoryData;
-  readonly selectedSlot: number;
-  /** Chunk indices the player has seen (world map fog of war). */
-  readonly explored: readonly number[];
-  readonly playTime: number;
-  // --- v2 ---
-  readonly level?: number;
-  readonly exp?: number;
-  readonly jobId?: string;
-  readonly stats?: BaseStats;
-  readonly statPoints?: number;
-  readonly skillPoints?: number;
-  readonly skills?: Readonly<Record<string, number>>;
-  readonly skillBar?: readonly (string | null)[];
-  readonly equipment?: EquipmentData;
-  readonly hp?: number;
-  readonly mp?: number;
-}
-
-export interface SaveBundle {
-  readonly meta: WorldMeta | null;
-  readonly player: PlayerSave | null;
-  readonly chunks: readonly SerializedChunk[];
-  /** AI adventurers (PHASE 4); null for older saves. */
-  readonly adventurers?: readonly AdventurerSave[] | null;
-  /** Economy and society (PHASE 5): market, prices, shops, parties, guilds, news. */
-  readonly society?: WorldSocietySave | null;
-}
-
-/** Untrusted on load: every part is validated by its own loader. */
-export interface WorldSocietySave {
-  readonly economy: unknown;
-  readonly society: unknown;
-}
+export { SAVE_VERSION };
+export type { PlayerSave, SaveBundle, WorldMeta, WorldSocietySave };
 
 export const EMPTY_SAVE: SaveBundle = {
   meta: null,

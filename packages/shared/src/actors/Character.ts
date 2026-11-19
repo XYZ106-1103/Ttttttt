@@ -41,6 +41,14 @@ export const HURT_IFRAMES = 0.75;
 
 export type CharacterKind = 'player' | 'adventurer';
 
+/**
+ * Keys of player characters: 'player' for the offline local player, 'pc:<id>' online. Everything
+ * else (adventurer keys 'adv-NN') is an AI.
+ */
+export function isPlayerKey(key: string): boolean {
+  return key === 'player' || key.startsWith('pc:');
+}
+
 /** Persistent part of a character (saves, network snapshots). */
 export interface CharacterSnapshot {
   readonly level?: number;

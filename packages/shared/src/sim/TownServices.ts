@@ -1,31 +1,23 @@
+import type { Adventurer } from '../ai/Adventurer';
 import {
-  type Adventurer,
   answerGuildInvite,
   answerGuildJoin,
   answerPartyInvite,
-  type BuyResult,
-  type Collected,
-  directTrade,
-  type FoundResult,
-  getNpcDef,
   greetPlayer,
-  type ListResult,
-  MAX_PARTY,
-  NPC_DEFS,
-  NPC_REACH,
-  type NpcDef,
-  type NpcShop,
-  type Offer,
-  offersForPlayer,
-  type Party,
   type PlayerReply,
   type PlayerRequest,
-  type ShopResult,
   statusReply,
-  TILE_SIZE,
-  type TradeFail,
-} from '@world/shared';
-import type { GameSimulation } from './GameSimulation';
+} from '../ai/social';
+import { offersForPlayer, type Offer } from '../ai/trading';
+import { TILE_SIZE } from '../constants';
+import { getNpcDef, NPC_DEFS, NPC_REACH, type NpcDef } from '../data/npcs';
+import type { BuyResult, Collected, ListResult } from '../economy/Market';
+import type { NpcShop, ShopResult } from '../economy/NpcShop';
+import { directTrade } from '../economy/trade';
+import type { TradeFail } from '../economy/types';
+import type { FoundResult } from '../society/Guild';
+import { MAX_PARTY, type Party } from '../society/Party';
+import type { WorldSim } from './WorldSim';
 
 export interface NpcPlacement {
   readonly def: NpcDef;
@@ -42,32 +34,37 @@ const TALK_RANGE = 10;
 const tooFar = { ok: false as const, reason: 'too_far' as const };
 const unavailable = { ok: false as const, reason: 'unavailable' as const };
 
+/** Where the village NPCs stand in a world. */
+export function npcPlacements(sim: Pick<WorldSim, 'world'>): NpcPlacement[] {
+  const sx = sim.world.generator.spawnTileX;
+  return NPC_DEFS.map((def) => {
+    const tx = sx + def.x;
+    return { def, x: tx * TILE_SIZE + TILE_SIZE / 2, y: sim.world.surfaceY(tx) * TILE_SIZE };
+  });
+}
+
 /**
- * Everything the player does with the town and its people. Each command checks the player is
- * really there (in range, alive) and then calls the validated shared economy/society rules —
- * exactly what a PHASE 6 server will do with the same requests.
+ * Everything one player does with the town and its people. Each command checks the player is
+ * really there (in range, alive) and then calls the validated shared economy/society rules. The
+ * server runs exactly these for every request; the offline client calls them directly.
  */
 export class TownServices {
   readonly npcs: readonly NpcPlacement[];
-  /** Market sales already reported to the player. */
-  seenSales = 0;
   /** Adventurers waiting for an answer to their party invitation. */
   readonly invites = new Set<string>();
 
-  constructor(private readonly sim: GameSimulation) {
-    const sx = sim.world.generator.spawnTileX;
-    this.npcs = NPC_DEFS.map((def) => {
-      const tx = sx + def.x;
-      return {
-        def,
-        x: tx * TILE_SIZE + TILE_SIZE / 2,
-        y: sim.world.surfaceY(tx) * TILE_SIZE,
-      };
-    });
+  constructor(
+    private readonly sim: WorldSim,
+    /** The acting player's key. */
+    readonly key: string,
+  ) {
+    this.npcs = npcPlacements(sim);
   }
 
   private get player() {
-    return this.sim.player;
+    const p = this.sim.playerOf(this.key);
+    if (!p) throw new Error(`Player ${this.key} is not in the world`);
+    return p;
   }
 
   private get now(): number {
@@ -151,7 +148,8 @@ export class TownServices {
   marketCollect(): Collected | null {
     if (!this.atExchange()) return null;
     const got = this.sim.economy.market.collect(this.player);
-    this.seenSales = 0;
+    const slot = this.sim.slot(this.key);
+    if (slot) slot.seenSales = 0;
     return got;
   }
 
@@ -173,61 +171,66 @@ export class TownServices {
     const a = this.talkable(key);
     if (!a) return null;
     a.listenUntil = this.now + 4;
-    return greetPlayer(a, this.ctx());
+    a.listenTo = this.key;
+    return greetPlayer(a, this.ctx(), this.key);
   }
 
   /** Keep the adventurer listening while the dialogue is open. */
   keepListening(key: string): void {
     const a = this.talkable(key);
-    if (a) a.listenUntil = this.now + 4;
+    if (a) {
+      a.listenUntil = this.now + 4;
+      a.listenTo = this.key;
+    }
   }
 
   ask(key: string, req: PlayerRequest): PlayerReply | null {
     const a = this.talkable(key);
     if (!a) return null;
     a.listenUntil = this.now + 4;
+    a.listenTo = this.key;
     const ctx = this.ctx();
     const society = this.sim.society;
+    const me = this.key;
     switch (req) {
       case 'status':
         return statusReply(a, ctx);
       case 'party': {
-        const mine = society.parties.of('player');
+        const mine = society.parties.of(me);
         if (mine && mine.members.length >= MAX_PARTY)
           return { line: 'p.party.full', accepted: false };
-        if (society.parties.same('player', a.key))
-          return { line: 'p.party.already', accepted: false };
-        const r = answerPartyInvite(a, ctx, this.player.level);
+        if (society.parties.same(me, a.key)) return { line: 'p.party.already', accepted: false };
+        const r = answerPartyInvite(a, ctx, me, this.player.level);
         if (r.accepted && !this.joinPlayerParty(a))
           return { line: 'p.party.full', accepted: false };
         return r;
       }
       case 'leave_party':
-        if (!society.parties.same('player', a.key)) return null;
+        if (!society.parties.same(me, a.key)) return null;
         society.parties.leave(a.key);
         return { line: 'p.party.leave' };
       case 'guild_invite': {
-        const g = society.guilds.of('player');
+        const g = society.guilds.of(me);
         if (!g) return null;
-        const r = answerGuildInvite(a, ctx);
+        const r = answerGuildInvite(a, ctx, me);
         if (r.accepted && society.guilds.join(g.id, a.key, this.now) === null) {
           a.memory.add({
             t: this.now,
             kind: 'guild',
             detail: g.id,
-            subject: 'player',
+            subject: me,
             importance: 0.85,
           });
-          a.memory.adjust('player', 0.08);
+          a.memory.adjust(me, 0.08);
           return r;
         }
         return r.accepted ? { line: 'p.guild.decline', accepted: false } : r;
       }
       case 'guild_join': {
-        if (society.guilds.of('player')) return null;
-        const r = answerGuildJoin(a, ctx);
+        if (society.guilds.of(me)) return null;
+        const r = answerGuildJoin(a, ctx, me);
         const g = society.guilds.of(a.key);
-        if (r.accepted && g && society.guilds.join(g.id, 'player', this.now) === null) return r;
+        if (r.accepted && g && society.guilds.join(g.id, me, this.now) === null) return r;
         return r.accepted ? { line: 'p.guildjoin.decline', accepted: false } : r;
       }
       case 'bye':
@@ -239,19 +242,19 @@ export class TownServices {
   /** `a` joins the player's party (creating one led by the player if needed). */
   private joinPlayerParty(a: Adventurer): boolean {
     const parties = this.sim.society.parties;
-    const party = parties.of('player') ?? parties.create('player', 'adventure', this.now);
+    const party = parties.of(this.key) ?? parties.create(this.key, 'adventure', this.now);
     if (!party || !parties.join(party.id, a.key)) return false;
-    const rel = a.memory.relation('player');
+    const rel = a.memory.relation(this.key);
     rel.parties++;
-    a.memory.adjust('player', 0.05);
-    a.memory.add({ t: this.now, kind: 'party', subject: 'player', importance: 0.6 });
+    a.memory.adjust(this.key, 0.05);
+    a.memory.add({ t: this.now, kind: 'party', subject: this.key, importance: 0.6 });
     // Companions travel with the player for a while, longer if they like them.
     a.partyUntil = this.now + (12 + Math.max(0, rel.affinity) * 40) * 60;
     return true;
   }
 
   get party(): Party | null {
-    return this.sim.society.parties.of('player');
+    return this.sim.society.parties.of(this.key);
   }
 
   /** Accept an adventurer's invitation to team up (e.g. when a boss appears). */
@@ -265,19 +268,19 @@ export class TownServices {
 
   declineInvite(from: string): void {
     this.invites.delete(from);
-    this.sim.adventurers.byKey(from)?.memory.adjust('player', -0.02);
+    this.sim.adventurers.byKey(from)?.memory.adjust(this.key, -0.02);
   }
 
   leaveParty(): void {
-    this.sim.society.parties.leave('player');
+    this.sim.society.parties.leave(this.key);
   }
 
   /** Party leader removes a member. */
   kick(key: string): boolean {
     const p = this.party;
-    if (!p || p.leader !== 'player' || !p.members.includes(key) || key === 'player') return false;
+    if (!p || p.leader !== this.key || !p.members.includes(key) || key === this.key) return false;
     this.sim.society.parties.leave(key);
-    this.sim.adventurers.byKey(key)?.memory.adjust('player', -0.08);
+    this.sim.adventurers.byKey(key)?.memory.adjust(this.key, -0.08);
     return true;
   }
 
@@ -286,7 +289,7 @@ export class TownServices {
   offers(key: string): { sells: Offer[]; buys: Offer[] } | null {
     const a = this.talkable(key);
     if (!a) return null;
-    return offersForPlayer(a, this.sim.economy, a.memory.relation('player').affinity);
+    return offersForPlayer(a, this.sim.economy, a.memory.relation(this.key).affinity);
   }
 
   buyFrom(key: string, itemId: string, count: number): ServiceResult {
@@ -311,12 +314,12 @@ export class TownServices {
 
   private noteTrade(a: Adventurer, itemId: string): void {
     a.listenUntil = this.now + 4;
-    a.memory.relation('player').trades++;
-    a.memory.adjust('player', 0.03);
+    a.memory.relation(this.key).trades++;
+    a.memory.adjust(this.key, 0.03);
     a.memory.add({
       t: this.now,
       kind: 'traded',
-      subject: 'player',
+      subject: this.key,
       detail: itemId,
       importance: 0.35,
     });
@@ -334,11 +337,11 @@ export class TownServices {
       this.sim.economy.ledger,
     );
     if (r.ok)
-      this.sim.society.news.push(this.now, 'guild_founded', { who: 'player', guild: r.guild.id });
+      this.sim.society.news.push(this.now, 'guild_founded', { who: this.key, guild: r.guild.id });
     return r;
   }
 
   leaveGuild(): void {
-    this.sim.society.guilds.leave('player', this.now);
+    this.sim.society.guilds.leave(this.key, this.now);
   }
 }

@@ -73,3 +73,7 @@ export * from './society/Society';
 export * from './ai/trading';
 export * from './ai/social';
 export * from './data/npcs';
+export * from './sim/saveTypes';
+export * from './sim/Player';
+export * from './sim/WorldSim';
+export * from './sim/TownServices';

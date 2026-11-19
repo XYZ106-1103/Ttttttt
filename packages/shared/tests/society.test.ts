@@ -226,7 +226,7 @@ describe('living world (background simulation)', () => {
     const d = makeDirector(300);
     const t0 = Date.now();
     // One minute of real-time background ticks at 60 Hz with the player far away.
-    d.updateTiers(5 * 16, 40 * 16, 0, true);
+    d.updateTiers([{ x: 5 * 16, y: 40 * 16 }], 0, true);
     for (let i = 0; i < 3600; i++) d.stepAbstract(1 / 60, i / 60, false);
     const ms = Date.now() - t0;
     expect(d.active).toHaveLength(0);

@@ -194,8 +194,10 @@ export class Adventurer {
   tradeAt = -Infinity;
   /** Lingering in town (chatting, browsing) until then, before heading out again. */
   townUntil = -Infinity;
-  /** The player is talking to this adventurer until then: stand still and listen. */
+  /** A player is talking to this adventurer until then: stand still and listen. */
   listenUntil = -Infinity;
+  /** Key of the player being listened to. */
+  listenTo: string | null = null;
   /** When a companion leaves the player's party to get back to their own life. */
   partyUntil = Infinity;
   /** Social housekeeping timer (guilds, parties). */

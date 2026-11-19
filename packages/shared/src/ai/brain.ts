@@ -63,7 +63,10 @@ export interface BrainEnv {
   readonly combat: CombatWorld;
   readonly monsters: readonly Monster[];
   readonly drops: readonly DropEntity[];
+  /** The nearest player (greetings, courtesy, listening). */
   readonly player: Character | null;
+  /** Every player character in the world (courtesy toward their fights). */
+  readonly players?: readonly Character[];
   readonly now: number;
   readonly dt: number;
   /** Tile columns of the protected starting village. */
@@ -312,16 +315,8 @@ function perceive(a: Adventurer, env: BrainEnv, needs: readonly Need[]): Percept
     const assist = m.targetId !== null && allyIds.has(m.targetId);
     if ((mine && d < 9 * TILE_SIZE) || d < 3 * TILE_SIZE) threats.push(m);
     if (claimedByOther(m, c.id, env.now, social?.allied) && !mine) continue;
-    // Courtesy: leave the player's fight alone unless partied with them (or it turns on us).
-    const pl = env.player;
-    if (
-      pl &&
-      !mine &&
-      !m.def.boss &&
-      !allyIds.has(pl.id) &&
-      (m.targetId === pl.id || m.damageBy.has(pl.id))
-    )
-      continue;
+    // Courtesy: leave players' fights alone unless partied with them (or it turns on us).
+    if (!mine && !m.def.boss && playersFight(m, env, allyIds)) continue;
     const bossOk =
       (c.level >= m.def.level - 6 && p.courage >= 0.35) || (assist && c.level >= m.def.level - 9);
     if (m.def.boss && !bossOk) continue;
@@ -419,7 +414,7 @@ function score(a: Adventurer, env: BrainEnv, per: Perception): Record<ActionId, 
     player && player.alive
       ? Math.abs(player.motor.x - c.motor.x) + Math.abs(player.motor.y - c.motor.y)
       : Infinity;
-  const affinity = a.memory.relations.get('player')?.affinity ?? 0;
+  const affinity = player ? (a.memory.relations.get(player.key)?.affinity ?? 0) : 0;
   const leaderDist = per.leader
     ? Math.abs(per.leader.motor.x - c.motor.x) + Math.abs(per.leader.motor.y - c.motor.y)
     : 0;
@@ -466,6 +461,16 @@ function score(a: Adventurer, env: BrainEnv, per: Perception): Record<ActionId, 
   // Light noise so equally placed adventurers do not all act alike.
   for (const k of Object.keys(s) as ActionId[]) if (s[k] > 0) s[k] *= 0.94 + a.rng.next() * 0.12;
   return s;
+}
+
+/** Is a player (not allied with us) fighting this monster? */
+function playersFight(m: Monster, env: BrainEnv, allyIds: ReadonlySet<number>): boolean {
+  const list = env.players ?? (env.player ? [env.player] : []);
+  for (const pl of list) {
+    if (allyIds.has(pl.id)) continue;
+    if (m.targetId === pl.id || m.damageBy.has(pl.id)) return true;
+  }
+  return false;
 }
 
 function playerGreetScore(a: Adventurer, env: BrainEnv, pd: number, affinity: number): number {
@@ -862,8 +867,9 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
   const per = perceive(a, env, needs);
 
   // The player is talking to us: stop and face them (unless something is attacking).
-  if (now < a.listenUntil && env.player && per.threats.length === 0) {
-    const pm = env.player.motor;
+  const listener = a.listenTo ? (env.social?.characterOf(a.listenTo) ?? env.player) : env.player;
+  if (now < a.listenUntil && listener && per.threats.length === 0) {
+    const pm = listener.motor;
     c.facing = pm.x >= c.motor.x ? 1 : -1;
     if (c.selectedSlot !== 0) c.select(0);
     out.action = { ...out.action, aimX: pm.x, aimY: pm.y - 22 };
@@ -890,7 +896,12 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
         pl && pl.alive
           ? Math.abs(pl.motor.x - c.motor.x) + Math.abs(pl.motor.y - c.motor.y)
           : Infinity;
-      const greet = playerGreetScore(a, env, pd, a.memory.relations.get('player')?.affinity ?? 0);
+      const greet = playerGreetScore(
+        a,
+        env,
+        pd,
+        pl ? (a.memory.relations.get(pl.key)?.affinity ?? 0) : 0,
+      );
       a.talkTarget = per.peer && per.peerScore >= greet ? per.peer.key : null;
     }
     if (best !== a.action) {
@@ -1029,15 +1040,14 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
           : IDLE_INPUT;
       out.action = { ...out.action, aimX: pl.motor.x, aimY: pl.motor.y - 22 };
       if (Math.abs(dx) <= 4 * TILE_SIZE) {
-        const rel = a.memory.relation('player');
+        const rel = a.memory.relation(pl.key);
         a.say(
           rel.met > 0 ? (rel.affinity > 0.3 ? 'greetFriend' : 'greetAgain') : 'greetNew',
           now,
           undefined,
           true,
         );
-        if (rel.met === 0)
-          a.memory.add({ t: now, kind: 'met', subject: 'player', importance: 0.5 });
+        if (rel.met === 0) a.memory.add({ t: now, kind: 'met', subject: pl.key, importance: 0.5 });
         rel.met++;
         rel.lastSeen = now;
         a.greetedAt = now;

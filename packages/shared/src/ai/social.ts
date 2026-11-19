@@ -7,6 +7,7 @@
  * The client turns line ids into text (`talk.<tone>.<line>` / `talk.<register>.<line>`), so all
  * wording lives in the localization files.
  */
+import { isPlayerKey } from '../actors/Character';
 import { MONSTER_DEFS } from '../data/monsters';
 import type { Economy } from '../economy/Economy';
 import { directTrade } from '../economy/trade';
@@ -50,7 +51,13 @@ export type SocialEvent =
     }
   | { readonly type: 'party'; readonly leader: string; readonly member: string }
   | { readonly type: 'guild'; readonly guild: string; readonly member: string }
-  | { readonly type: 'invitePlayer'; readonly from: string; readonly purpose: PartyPurpose };
+  | {
+      readonly type: 'invitePlayer';
+      readonly from: string;
+      /** Player key invited. */
+      readonly to: string;
+      readonly purpose: PartyPurpose;
+    };
 
 type Group = 'stranger' | 'known' | 'friend' | 'rival';
 
@@ -581,7 +588,7 @@ export function socialHousekeeping(a: Adventurer, ctx: SocialCtx): void {
   }
   // Leave a party whose members turned sour, or the player's party when it is time to go.
   const party = ctx.society.parties.of(a.key);
-  if (party && party.members.includes('player') && ctx.now >= a.partyUntil) {
+  if (party && party.members.some((m) => isPlayerKey(m)) && ctx.now >= a.partyUntil) {
     ctx.society.parties.leave(a.key);
     a.partyUntil = Infinity;
     a.say('partyBye', ctx.now, undefined, true);
@@ -608,24 +615,24 @@ export interface PlayerReply {
   readonly accepted?: boolean;
 }
 
-/** The adventurer greets the player, remembering shared history. */
-export function greetPlayer(a: Adventurer, ctx: SocialCtx): PlayerReply {
-  const rel = a.memory.relation('player');
+/** The adventurer greets a player, remembering shared history. */
+export function greetPlayer(a: Adventurer, ctx: SocialCtx, playerKey: string): PlayerReply {
+  const rel = a.memory.relation(playerKey);
   const label = relationLabel(rel);
   let line: string;
-  if (ctx.society.parties.same(a.key, 'player')) line = 'p.hello.party';
+  if (ctx.society.parties.same(a.key, playerKey)) line = 'p.hello.party';
   else if (rel.raids > 0 && rel.affinity > 0) line = 'p.hello.raid';
   else if (rel.helped > 0 && rel.affinity > 0.1) line = 'p.hello.helped';
   else line = `p.hello.${group(label)}`;
   // Talking warms people up a little (once every few minutes).
   if (ctx.now - rel.lastTalk > 180) {
     if (rel.met === 0)
-      a.memory.add({ t: ctx.now, kind: 'met', subject: 'player', importance: 0.5 });
+      a.memory.add({ t: ctx.now, kind: 'met', subject: playerKey, importance: 0.5 });
     rel.met++;
     rel.talks++;
     rel.lastTalk = ctx.now;
     rel.lastSeen = ctx.now;
-    a.memory.adjust('player', 0.02 + a.profile.personality.friendliness * 0.03);
+    a.memory.adjust(playerKey, 0.02 + a.profile.personality.friendliness * 0.03);
   }
   return { line, params: { name: a.key } };
 }
@@ -656,10 +663,15 @@ export function statusReply(a: Adventurer, ctx: SocialCtx): PlayerReply {
 }
 
 /** Would the adventurer join the player's party? */
-export function answerPartyInvite(a: Adventurer, ctx: SocialCtx, playerLevel: number): PlayerReply {
-  const rel = a.memory.relation('player');
+export function answerPartyInvite(
+  a: Adventurer,
+  ctx: SocialCtx,
+  playerKey: string,
+  playerLevel: number,
+): PlayerReply {
+  const rel = a.memory.relation(playerKey);
   const theirs = ctx.society.parties.of(a.key);
-  if (theirs && !ctx.society.parties.same(a.key, 'player'))
+  if (theirs && !ctx.society.parties.same(a.key, playerKey))
     return { line: 'p.party.busy', accepted: false };
   if (rel.affinity <= RIVAL_AFFINITY) return { line: 'p.party.decline', accepted: false };
   const p = a.profile.personality;
@@ -678,18 +690,18 @@ export function answerPartyInvite(a: Adventurer, ctx: SocialCtx, playerLevel: nu
 }
 
 /** Would the adventurer join the player's guild? */
-export function answerGuildInvite(a: Adventurer, ctx: SocialCtx): PlayerReply {
+export function answerGuildInvite(a: Adventurer, ctx: SocialCtx, playerKey: string): PlayerReply {
   if (ctx.society.guilds.of(a.key)) return { line: 'p.guild.have', accepted: false };
-  const rel = a.memory.relation('player').affinity;
+  const rel = a.memory.relation(playerKey).affinity;
   const ok = rel >= 0.2 && rel + a.profile.personality.sociability * 0.4 > 0.5;
   return { line: ok ? 'p.guild.accept' : 'p.guild.decline', accepted: ok };
 }
 
 /** The player asks to join the adventurer's guild. */
-export function answerGuildJoin(a: Adventurer, ctx: SocialCtx): PlayerReply {
+export function answerGuildJoin(a: Adventurer, ctx: SocialCtx, playerKey: string): PlayerReply {
   const g = ctx.society.guilds.of(a.key);
   if (!g) return { line: 'p.guildjoin.none', accepted: false };
-  const rel = a.memory.relation('player').affinity;
+  const rel = a.memory.relation(playerKey).affinity;
   const ok =
     rel >= 0.15 || (g.leader === a.key && rel >= 0.05 && a.profile.personality.sociability > 0.6);
   return {

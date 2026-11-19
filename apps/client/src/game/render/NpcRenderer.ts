@@ -4,7 +4,7 @@ import { t } from '../../i18n';
 import { randomAppearance } from '../art/character/appearance';
 import { CharacterView } from '../entities/CharacterView';
 import { createFrameEvents } from '../entities/FrameEvents';
-import type { NpcPlacement } from '../sim/TownServices';
+import type { NpcPlacement } from '@world/shared';
 import { CharacterTextureQueue } from './CharacterTextureQueue';
 
 interface NpcSprite {

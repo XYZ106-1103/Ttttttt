@@ -11,7 +11,7 @@
  * adventurers, instant meetings off-screen, market visits, parties (shared kills, raids) and
  * guilds.
  */
-import type { Character } from '../actors/Character';
+import { type Character, isPlayerKey } from '../actors/Character';
 import {
   type CharacterEnv,
   newStepOut,
@@ -99,7 +99,8 @@ export interface DirectorTickEnv {
   readonly interaction: InteractionContext;
   readonly monsters: readonly Monster[];
   readonly drops: readonly DropEntity[];
-  readonly player: Character | null;
+  /** Player characters in the world (online: many; offline: one). */
+  readonly players: readonly Character[];
   readonly now: number;
   readonly dt: number;
   readonly night: boolean;
@@ -136,8 +137,9 @@ export class AdventurerDirector {
   private abstractAcc = 0;
   private distantAcc = 0;
   private convId = 1;
-  private player: Character | null = null;
-  private anchorX = 0;
+  /** Player characters by key (refreshed every tick). */
+  private readonly players = new Map<string, Character>();
+  private anchors: readonly { x: number; y: number }[] = [];
   private readonly maxActive: number;
   private readonly activeRadius: number;
   private readonly demoteRadius: number;
@@ -192,21 +194,21 @@ export class AdventurerDirector {
       night,
       rng: this.socialRng,
       byKey: (k) => this.keyMap.get(k),
-      levelOf: (k) =>
-        k === 'player' ? (this.player?.level ?? 0) : (this.keyMap.get(k)?.character.level ?? 0),
+      levelOf: (k) => this.players.get(k)?.level ?? this.keyMap.get(k)?.character.level ?? 0,
       events: this.socialEvents,
     };
   }
 
   /** Character for a key among those present in the active world. */
   characterOf(key: string): Character | null {
-    if (key === 'player') return this.player;
+    const p = this.players.get(key);
+    if (p) return p;
     const a = this.keyMap.get(key);
     return a && a.tier === 'active' ? a.character : null;
   }
 
   keyOfCharacter(id: number): string | null {
-    if (this.player && id === this.player.id) return 'player';
+    for (const p of this.players.values()) if (p.id === id) return p.key;
     return this.byId.get(id)?.key ?? null;
   }
 
@@ -300,21 +302,49 @@ export class AdventurerDirector {
                 : 'town';
   }
 
-  /** Re-evaluate which adventurers run in full detail around the anchor (the player). */
-  updateTiers(anchorX: number, anchorY: number, now: number, force = false): void {
-    this.anchorX = anchorX;
+  /** Register the player characters present this tick (keys, positions, LOD anchors). */
+  setPlayers(players: readonly Character[]): void {
+    this.players.clear();
+    for (const p of players) this.players.set(p.key, p);
+    this.anchors = players.map((p) => ({ x: p.motor.x, y: p.motor.y }));
+  }
+
+  /** Distance (tiles) from an adventurer to the nearest anchor (player). */
+  private nearest(
+    a: Adventurer,
+    anchors: readonly { x: number; y: number }[],
+  ): {
+    dx: number;
+    dy: number;
+    anchor: { x: number; y: number } | null;
+  } {
+    let best = { dx: Infinity, dy: Infinity, anchor: null as { x: number; y: number } | null };
+    for (const p of anchors) {
+      const dx = Math.abs(a.character.motor.x - p.x) / TILE_SIZE;
+      const dy = Math.abs(a.character.motor.y - p.y) / TILE_SIZE;
+      if (dx + dy < best.dx + best.dy) best = { dx, dy, anchor: p };
+    }
+    return best;
+  }
+
+  /**
+   * Re-evaluate which adventurers run in full detail around the players (LOD anchors). One
+   * anchor (offline) or many (online); the active cap grows with the number of players.
+   */
+  updateTiers(anchors: readonly { x: number; y: number }[], now: number, force = false): void {
+    this.anchors = anchors;
     if (!force && now < this.tierTimer) return;
     this.tierTimer = now + 0.5;
-    const dist = (a: Adventurer) => ({
-      dx: Math.abs(a.character.motor.x - anchorX) / TILE_SIZE,
-      dy: Math.abs(a.character.motor.y - anchorY) / TILE_SIZE,
-    });
+    const dist = (a: Adventurer) => this.nearest(a, anchors);
+    const cap = Math.min(48, this.maxActive + Math.max(0, anchors.length - 1) * 6);
     for (const a of this.all) {
       if (a.tier !== 'active') continue;
       const d = dist(a);
       if (d.dx > this.demoteRadius || d.dy > 60) this.demote(a);
     }
-    const mates = new Set(this.society.parties.mates('player'));
+    const mates = new Set<string>();
+    for (const k of this.players.keys())
+      for (const m of this.society.parties.mates(k)) mates.add(m);
     const candidates = this.all
       .filter((a) => a.tier === 'abstract' && a.character.alive)
       .map((a) => ({ a, d: dist(a) }))
@@ -325,13 +355,13 @@ export class AdventurerDirector {
       );
     let active = this.active.length;
     for (const { a } of candidates) {
-      if (active >= this.maxActive) break;
+      if (active >= cap) break;
       this.promote(a, now);
       active++;
     }
-    if (active > this.maxActive) {
+    if (active > cap) {
       const far = this.active.sort((x, y) => dist(y).dx - dist(x).dx);
-      for (let i = 0; i < active - this.maxActive; i++) {
+      for (let i = 0; i < active - cap; i++) {
         const a = far[i];
         if (a) this.demote(a);
       }
@@ -341,9 +371,9 @@ export class AdventurerDirector {
     for (const a of this.all) {
       if (a.tier !== 'abstract') continue;
       const d = dist(a);
-      if (d.dx >= VISIBLE_RADIUS || d.dy >= 24) continue;
-      const side = a.character.motor.x >= anchorX ? 1 : -1;
-      const tx = Math.floor(anchorX / TILE_SIZE) + side * (VISIBLE_RADIUS + 2);
+      if (d.dx >= VISIBLE_RADIUS || d.dy >= 24 || !d.anchor) continue;
+      const side = a.character.motor.x >= d.anchor.x ? 1 : -1;
+      const tx = Math.floor(d.anchor.x / TILE_SIZE) + side * (VISIBLE_RADIUS + 2);
       a.character.motor.x = tx * TILE_SIZE + TILE_SIZE / 2;
       a.character.motor.y = this.world.surfaceY(tx) * TILE_SIZE;
     }
@@ -357,7 +387,7 @@ export class AdventurerDirector {
     safe: { safeFrom: number; safeTo: number },
   ): ActiveStep[] {
     const out: ActiveStep[] = [];
-    this.player = env.player;
+    if (this.players.size !== env.players.length) this.setPlayers(env.players);
     const ctx = this.socialCtx(env.now, env.night);
     const active = this.active;
     const social: BrainSocial = {
@@ -379,7 +409,8 @@ export class AdventurerDirector {
       combat: this.combat,
       monsters: env.monsters,
       drops: env.drops,
-      player: env.player,
+      player: null as Character | null,
+      players: env.players,
       now: env.now,
       dt: env.dt,
       safeFrom: safe.safeFrom,
@@ -402,6 +433,8 @@ export class AdventurerDirector {
         continue;
       }
       a.character.refreshStats(env.now);
+      // Each adventurer pays attention to the nearest player.
+      brainEnv.player = this.nearestPlayer(c, env.players);
       const intent = thinkAdventurer(a, brainEnv);
       const res = newStepOut();
       stepCharacter(charEnv, c, intent, res);
@@ -417,6 +450,20 @@ export class AdventurerDirector {
     this.stepConversations(env.now);
     this.society.parties.expire(env.now);
     return out;
+  }
+
+  private nearestPlayer(c: Character, players: readonly Character[]): Character | null {
+    let best: Character | null = null;
+    let bd = Infinity;
+    for (const p of players) {
+      if (!p.alive) continue;
+      const d = Math.abs(p.motor.x - c.motor.x) + Math.abs(p.motor.y - c.motor.y);
+      if (d < bd) {
+        bd = d;
+        best = p;
+      }
+    }
+    return best;
   }
 
   // --- Conversations ------------------------------------------------------------------------
@@ -570,7 +617,7 @@ export class AdventurerDirector {
     if (!party) return [key];
     const out: string[] = [];
     for (const k of party.members) {
-      const ch = k === 'player' ? this.player : this.keyMap.get(k)?.character;
+      const ch = this.players.get(k) ?? this.keyMap.get(k)?.character;
       if (!ch || !ch.alive) continue;
       if (k === key || Math.abs(ch.motor.x - x) < 40 * TILE_SIZE) out.push(k);
     }
@@ -582,8 +629,8 @@ export class AdventurerDirector {
     return n <= 1 ? 1 : (1 + 0.2 * (n - 1)) / n;
   }
 
-  /** A boss appeared near the player: brave adventurers rally and one asks to team up. */
-  onBossSpawned(boss: Monster, now: number): void {
+  /** A boss appeared near a player: brave adventurers rally and one asks them to team up. */
+  onBossSpawned(boss: Monster, now: number, summoner: string): void {
     const eligible = this.active
       .filter((a) => {
         const c = a.character;
@@ -596,9 +643,14 @@ export class AdventurerDirector {
       })
       .sort((x, y) => y.character.level - x.character.level);
     const lead = eligible.find((a) => !this.society.parties.of(a.key));
-    if (lead && this.society.parties.mates('player').length < 3) {
+    if (lead && this.society.parties.mates(summoner).length < 3) {
       lead.sayLine('p.raid.ask', now, { monster: boss.def.id });
-      this.socialEvents.push({ type: 'invitePlayer', from: lead.key, purpose: 'raid' });
+      this.socialEvents.push({
+        type: 'invitePlayer',
+        from: lead.key,
+        to: summoner,
+        purpose: 'raid',
+      });
     }
     for (const a of eligible)
       a.memory.add({ t: now, kind: 'boss_seen', detail: boss.def.id, importance: 0.7 });
@@ -619,7 +671,7 @@ export class AdventurerDirector {
         t: now,
         kind: 'raid',
         detail: bossId,
-        subject: keys.includes('player') ? 'player' : undefined,
+        subject: keys.find((k) => isPlayerKey(k)),
         importance: 1,
       });
       if (a.goal?.kind === 'raid') a.goal.done = true;
@@ -628,14 +680,14 @@ export class AdventurerDirector {
     this.society.news.push(now, 'boss_slain', { who: keys.join(','), monster: bossId });
   }
 
-  /** The player hit a monster that was after this adventurer. */
-  noteHelp(a: Adventurer, now: number): void {
-    const rel = a.memory.relation('player');
+  /** A player hit a monster that was after this adventurer. */
+  noteHelp(a: Adventurer, playerKey: string, now: number): void {
+    const rel = a.memory.relation(playerKey);
     if (now - rel.lastSeen < 6 && rel.helped > 0) return;
     rel.helped++;
     rel.lastSeen = now;
-    a.memory.adjust('player', 0.1 + a.profile.personality.friendliness * 0.05);
-    a.memory.add({ t: now, kind: 'helped_by', subject: 'player', importance: 0.65 });
+    a.memory.adjust(playerKey, 0.1 + a.profile.personality.friendliness * 0.05);
+    a.memory.add({ t: now, kind: 'helped_by', subject: playerKey, importance: 0.65 });
     a.say('thanks', now, undefined, true);
   }
 
@@ -652,8 +704,8 @@ export class AdventurerDirector {
     if (distantStep > 0) this.distantAcc = 0;
     for (const a of this.all) {
       if (a.tier !== 'abstract') continue;
-      // Far from the player: coarser (cheaper) steps.
-      if (Math.abs(a.character.motor.x - this.anchorX) > DISTANT_RADIUS * TILE_SIZE) {
+      // Far from every player: coarser (cheaper) steps.
+      if (this.nearest(a, this.anchors).dx > DISTANT_RADIUS) {
         if (distantStep > 0) this.abstractTick(a, distantStep, now, night);
       } else this.abstractTick(a, step, now, night);
     }
@@ -665,7 +717,7 @@ export class AdventurerDirector {
   /** Turn party/guild changes into world news (and keep the change lists bounded). */
   drainSocietyChanges(now: number): void {
     for (const ch of this.society.parties.changes) {
-      if (ch.type === 'formed' && ch.party.purpose === 'raid' && ch.party.leader !== 'player')
+      if (ch.type === 'formed' && ch.party.purpose === 'raid' && !isPlayerKey(ch.party.leader))
         this.society.news.push(now, 'party_formed', { who: ch.party.leader });
     }
     this.society.parties.changes.length = 0;
@@ -728,7 +780,7 @@ export class AdventurerDirector {
     if (c.hp < c.stats.maxHp * 0.5) return 'rest';
     const party = this.society.parties.of(a.key);
     if (party && party.leader !== a.key) {
-      if (party.leader === 'player') return 'travel';
+      if (isPlayerKey(party.leader)) return 'travel';
       const lead = this.keyMap.get(party.leader);
       if (lead) return lead.activity === 'rest' ? 'hunt' : lead.activity;
     }
@@ -790,8 +842,7 @@ export class AdventurerDirector {
     // Party members stay with their leader.
     const party = this.society.parties.of(a.key);
     if (party && party.leader !== a.key) {
-      const lead =
-        party.leader === 'player' ? this.player : this.keyMap.get(party.leader)?.character;
+      const lead = this.players.get(party.leader) ?? this.keyMap.get(party.leader)?.character;
       if (lead) targetX = lead.motor.x + ((a.profile.index % 3) - 1) * 2 * TILE_SIZE;
     }
     const dx = targetX - c.motor.x;
@@ -807,7 +858,7 @@ export class AdventurerDirector {
     switch (a.activity) {
       case 'hunt':
         // Party members are credited through the leader's kills.
-        if (!party || party.leader === a.key || party.leader === 'player')
+        if (!party || party.leader === a.key || isPlayerKey(party.leader))
           this.abstractHunt(a, dt, now);
         break;
       case 'town':
