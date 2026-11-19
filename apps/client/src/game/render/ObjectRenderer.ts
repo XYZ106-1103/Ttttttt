@@ -33,6 +33,8 @@ const DEPTH: Record<string, number> = {
   bush: 8,
 };
 const DEPTH_BACK = 10;
+/** Objects with a front side (signs, boards, banners) are never mirrored. */
+const NO_FLIP = new Set(['campfire', 'signpost', 'shop_stall', 'exchange_board', 'guild_banner']);
 const DEPTH_FRONT = 40;
 
 /**
@@ -169,7 +171,7 @@ export class ObjectRenderer {
       );
       sprite.setOrigin(0.5, 1);
       sprite.setDepth(DEPTH[o.key] ?? (def.depth === 'front' ? DEPTH_FRONT : DEPTH_BACK));
-      if (o.key !== 'campfire' && o.key !== 'signpost' && (o.seed & 4) !== 0) sprite.setFlipX(true);
+      if (!NO_FLIP.has(o.key) && (o.seed & 4) !== 0) sprite.setFlipX(true);
       if (frames > 1)
         sprite.play({ key: objectAnimKey(o.key, o.variant), startFrame: o.seed % frames });
       this.worldLayer.add(sprite);

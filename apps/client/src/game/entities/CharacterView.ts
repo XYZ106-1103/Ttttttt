@@ -147,6 +147,22 @@ export class CharacterView {
   }
 
   /** Name tag position in label space (for speech bubbles). */
+  /** Name tag bounds in label-layer pixels (for de-overlapping crowded tags). */
+  get tagBounds(): { left: number; right: number; y: number; h: number } {
+    const w = this.nameTag.width;
+    return {
+      left: this.nameTag.x - w / 2,
+      right: this.nameTag.x + w / 2,
+      y: this.nameTag.y,
+      h: this.nameTag.height,
+    };
+  }
+
+  /** Shift the name tag down by `rows` tag heights (crowds stack their tags). */
+  stackTag(rows: number): void {
+    if (rows > 0) this.nameTag.y += rows * (this.nameTag.height + 1);
+  }
+
   get tagAnchor(): { x: number; y: number } {
     return { x: this.nameTag.x, y: this.nameTag.y };
   }

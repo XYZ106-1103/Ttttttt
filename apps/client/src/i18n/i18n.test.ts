@@ -41,3 +41,18 @@ describe('i18n', () => {
     expect(t('hud.day', { day: 3 })).toBe('3일차');
   });
 });
+
+describe('Korean particles', () => {
+  it('picks particles from the last syllable of substituted words', async () => {
+    const { josa } = await import('./index');
+    expect(josa('휘니(이)라고 해요')).toBe('휘니라고 해요');
+    expect(josa('은랑(이)라고 해요')).toBe('은랑이라고 해요');
+    expect(josa('테아이(가) 왔다')).toBe('테아가 왔다');
+    expect(josa('은랑이(가) 왔다')).toBe('은랑이 왔다');
+    expect(josa('철 검을(를) 샀다')).toBe('철 검을 샀다');
+    expect(josa('전사(으)로 전직')).toBe('전사로 전직');
+    expect(josa('검(으)로')).toBe('검으로');
+    expect(josa('활(으)로')).toBe('활로');
+    expect(josa('Lv.10이(가)')).toBe('Lv.10이');
+  });
+});

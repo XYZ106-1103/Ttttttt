@@ -26,7 +26,16 @@ export type Goal =
       readonly count: number;
       progress: number;
       readonly since: number;
-    };
+    }
+  /** Earn gold through trade. */
+  | { readonly kind: 'wealth'; readonly target: number; readonly since: number }
+  /** Defeat a boss with a party (needs the summoning item). */
+  | { readonly kind: 'raid'; readonly monsterId: string; done: boolean; readonly since: number };
+
+/** The boss raid parties go after, and the item that summons it. */
+export const RAID_BOSS = 'corestone_golem';
+export const RAID_SUMMON = 'golem_heart';
+export const RAID_LEVEL = 12;
 
 /** Goals older than this are reconsidered (seconds of world time). */
 export const GOAL_TIMEOUT = 20 * 60;
@@ -125,9 +134,17 @@ export function chooseGoal(
     since: now,
   };
   const w = (base: number, trait: number) => base * (0.6 + trait * 0.8);
+  const wealth: Goal = {
+    kind: 'wealth',
+    target: Math.round((c.gold + 150 + c.level * 40) / 10) * 10,
+    since: now,
+  };
+  const raid: Goal = { kind: 'raid', monsterId: RAID_BOSS, done: false, since: now };
+  const raidReady = c.level >= RAID_LEVEL && p.courage > 0.4;
   switch (archetype) {
     case 'hunter':
       options.push([level, w(1, p.competitiveness)], [slay, w(0.6, p.aggression)]);
+      if (raidReady) options.push([raid, w(0.8, p.courage)]);
       if (weapon)
         options.push([{ kind: 'item', itemId: weapon.id, count: 1, since: now }, w(0.9, p.greed)]);
       if (armor)
@@ -145,9 +162,17 @@ export function chooseGoal(
           { kind: 'item', itemId: 'healing_potion', count: 6, since: now },
           w(0.6, p.caution),
         ]);
-      options.push([level, w(0.4, p.competitiveness)]);
+      options.push([level, w(0.4, p.competitiveness)], [wealth, w(0.5, p.greed)]);
+      break;
+    case 'merchant':
+      options.push([wealth, w(1.4, p.greed)], [level, w(0.35, p.competitiveness)]);
+      if (pick)
+        options.push([{ kind: 'item', itemId: pick.id, count: 1, since: now }, w(0.4, p.greed)]);
+      if (armor)
+        options.push([{ kind: 'item', itemId: armor.id, count: 1, since: now }, w(0.4, p.caution)]);
       break;
     case 'explorer':
+      if (raidReady) options.push([raid, w(0.4, p.courage)]);
       options.push(
         [explore, w(1, p.curiosity)],
         [slay, w(0.5, p.courage)],
@@ -177,5 +202,9 @@ export function goalDone(g: Goal, c: Character): boolean {
       return Math.abs(c.motor.x / 16 - g.targetX) < 4;
     case 'slay':
       return g.progress >= g.count;
+    case 'wealth':
+      return c.gold >= g.target;
+    case 'raid':
+      return g.done;
   }
 }

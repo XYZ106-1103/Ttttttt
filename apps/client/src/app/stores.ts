@@ -126,7 +126,7 @@ export interface WorldState {
   readonly seed: number;
 }
 
-export type ChatChannel = 'system' | 'local' | 'notice';
+export type ChatChannel = 'system' | 'local' | 'notice' | 'nearby' | 'news' | 'party' | 'trade';
 
 export interface ChatMessage {
   readonly id: number;
@@ -154,12 +154,26 @@ export interface AdventurerSummary {
   /** Tile column relative to the spawn. */
   readonly x: number;
   readonly affinity: number;
+  /** Relation label toward the player (stranger, friend, rival...). */
+  readonly relation: string;
+  readonly guild: string | null;
+  /** In the player's party. */
+  readonly partyMate: boolean;
 }
 
 export interface AdventurerMemoryView {
   readonly kind: string;
   readonly detail?: string;
+  /** Resolved name of who it involved. */
+  readonly who?: string;
   readonly ago: number;
+}
+
+export interface AdventurerTieView {
+  readonly key: string;
+  readonly name: string;
+  readonly label: string;
+  readonly affinity: number;
 }
 
 export interface AdventurerDetail extends AdventurerSummary {
@@ -176,7 +190,14 @@ export interface AdventurerDetail extends AdventurerSummary {
   readonly scores: readonly (readonly [string, number])[];
   readonly met: number;
   readonly helped: number;
+  readonly talks: number;
+  readonly trades: number;
+  readonly raids: number;
   readonly weapon: string | null;
+  /** Strongest ties to other adventurers (friends and rivals). */
+  readonly ties: readonly AdventurerTieView[];
+  /** Close enough to talk to. */
+  readonly talkable: boolean;
 }
 
 export interface AdventurersState {
@@ -186,6 +207,11 @@ export interface AdventurersState {
 }
 
 export type WindowId =
+  | 'dialogue'
+  | 'shop'
+  | 'exchange'
+  | 'trade'
+  | 'guild'
   | 'adventurer'
   | 'roster'
   | 'character'
@@ -221,6 +247,115 @@ export interface DebugState {
   readonly modifiedChunks: number;
 }
 
+export interface ListingView {
+  readonly id: number;
+  readonly itemId: string;
+  readonly count: number;
+  readonly price: number;
+  readonly seller: string;
+  readonly mine: boolean;
+  /** Seconds until it expires. */
+  readonly left: number;
+}
+
+export interface PriceView {
+  readonly ref: number;
+  readonly trend: number;
+  readonly suggested: number;
+}
+
+export interface ShopItemView {
+  readonly itemId: string;
+  readonly stock: number;
+  readonly max: number;
+  readonly price: number;
+}
+
+export interface EconomyState {
+  readonly gold: number;
+  readonly mailGold: number;
+  readonly mailItems: number;
+  readonly unreadSales: number;
+  /** Exchange listings (refreshed while the exchange window is open). */
+  readonly listings: readonly ListingView[];
+  readonly maxListings: number;
+  /** Market prices for items currently listed or held. */
+  readonly prices: Readonly<Record<string, PriceView>>;
+  readonly shop: { readonly npcId: string; readonly items: readonly ShopItemView[] } | null;
+  /** What the open shop pays for each inventory item. */
+  readonly buyback: Readonly<Record<string, number>>;
+}
+
+export interface PartyMemberView {
+  readonly key: string;
+  readonly name: string;
+  readonly level: number;
+  readonly jobId: string;
+  readonly hp: number;
+  readonly maxHp: number;
+  readonly alive: boolean;
+  readonly leader: boolean;
+  readonly near: boolean;
+}
+
+export interface GuildMemberView {
+  readonly key: string;
+  readonly name: string;
+  readonly level: number;
+  readonly jobId: string;
+  readonly leader: boolean;
+  readonly near: boolean;
+}
+
+export interface GuildView {
+  readonly id: string;
+  readonly name: string;
+  readonly emblem: number;
+  readonly leaderName: string;
+  readonly fame: number;
+  readonly members: readonly GuildMemberView[];
+  readonly log: readonly {
+    readonly kind: string;
+    readonly who: string;
+    readonly detail: string;
+    readonly ago: number;
+  }[];
+}
+
+export interface GuildListItem {
+  readonly id: string;
+  readonly name: string;
+  readonly emblem: number;
+  readonly leaderName: string;
+  readonly members: number;
+  readonly fame: number;
+}
+
+export interface SocialState {
+  readonly party: readonly PartyMemberView[] | null;
+  readonly partyLeader: boolean;
+  readonly guild: GuildView | null;
+  readonly guilds: readonly GuildListItem[];
+  readonly invites: readonly {
+    readonly from: string;
+    readonly name: string;
+    readonly purpose: string;
+  }[];
+  /** NPC the player stands next to. */
+  readonly nearNpc: string | null;
+}
+
+/** Who the dialogue window is talking to. */
+export type DialogueTarget =
+  | { readonly kind: 'npc'; readonly id: string }
+  | { readonly kind: 'adventurer'; readonly key: string };
+
+export interface DialogueState {
+  readonly target: DialogueTarget | null;
+  /** Bumps every time a dialogue is (re)opened. */
+  readonly seq: number;
+}
+
 export interface Stores {
   readonly app: Store<AppState>;
   readonly player: Store<PlayerState>;
@@ -233,6 +368,9 @@ export interface Stores {
   readonly feed: Store<FeedState>;
   readonly combat: Store<CombatState>;
   readonly adventurers: Store<AdventurersState>;
+  readonly economy: Store<EconomyState>;
+  readonly social: Store<SocialState>;
+  readonly dialogue: Store<DialogueState>;
 }
 
 const ZERO_STATS = { str: 0, dex: 0, int: 0, vit: 0, luk: 0 };
@@ -331,6 +469,26 @@ export function createStores(): Stores {
       lastLevel: 1,
     }),
     adventurers: createStore<AdventurersState>({ list: [], selected: null, detail: null }),
+    economy: createStore<EconomyState>({
+      gold: 0,
+      mailGold: 0,
+      mailItems: 0,
+      unreadSales: 0,
+      listings: [],
+      maxListings: 12,
+      prices: {},
+      shop: null,
+      buyback: {},
+    }),
+    social: createStore<SocialState>({
+      party: null,
+      partyLeader: false,
+      guild: null,
+      guilds: [],
+      invites: [],
+      nearNpc: null,
+    }),
+    dialogue: createStore<DialogueState>({ target: null, seq: 0 }),
   };
 }
 

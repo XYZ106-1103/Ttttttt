@@ -7,7 +7,7 @@ import type {
 } from '@world/shared';
 
 /** v2 (PHASE 3) adds progression, job, skills and equipment; v1 saves load with defaults. */
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface WorldMeta {
   readonly v: number;
@@ -47,9 +47,23 @@ export interface SaveBundle {
   readonly chunks: readonly SerializedChunk[];
   /** AI adventurers (PHASE 4); null for older saves. */
   readonly adventurers?: readonly AdventurerSave[] | null;
+  /** Economy and society (PHASE 5): market, prices, shops, parties, guilds, news. */
+  readonly society?: WorldSocietySave | null;
 }
 
-export const EMPTY_SAVE: SaveBundle = { meta: null, player: null, chunks: [], adventurers: null };
+/** Untrusted on load: every part is validated by its own loader. */
+export interface WorldSocietySave {
+  readonly economy: unknown;
+  readonly society: unknown;
+}
+
+export const EMPTY_SAVE: SaveBundle = {
+  meta: null,
+  player: null,
+  chunks: [],
+  adventurers: null,
+  society: null,
+};
 
 /** Saves from this version or older are migrated on load; newer ones are ignored. */
 function supported(v: unknown): boolean {
@@ -70,6 +84,7 @@ export interface SaveStore {
     meta: WorldMeta,
     player: PlayerSave,
     adventurers?: readonly AdventurerSave[],
+    society?: WorldSocietySave,
   ): Promise<void>;
   clear(worldId: string): Promise<void>;
 }
@@ -80,6 +95,7 @@ export class MemorySaveStore implements SaveStore {
   private meta: WorldMeta | null = null;
   private player: PlayerSave | null = null;
   private adventurers: readonly AdventurerSave[] | null = null;
+  private society: WorldSocietySave | null = null;
 
   constructor(persistent = false) {
     this.persistent = persistent;
@@ -91,6 +107,7 @@ export class MemorySaveStore implements SaveStore {
       player: this.player,
       chunks: [...this.chunks.values()],
       adventurers: this.adventurers,
+      society: this.society,
     };
   }
 
@@ -103,10 +120,12 @@ export class MemorySaveStore implements SaveStore {
     meta: WorldMeta,
     player: PlayerSave,
     adventurers?: readonly AdventurerSave[],
+    society?: WorldSocietySave,
   ): Promise<void> {
     this.meta = meta;
     this.player = player;
     if (adventurers) this.adventurers = adventurers;
+    if (society) this.society = society;
   }
 
   async clear(): Promise<void> {
@@ -114,6 +133,7 @@ export class MemorySaveStore implements SaveStore {
     this.meta = null;
     this.player = null;
     this.adventurers = null;
+    this.society = null;
   }
 }
 
@@ -157,12 +177,15 @@ export class IdbSaveStore implements SaveStore {
 
   async load(worldId: string): Promise<SaveBundle> {
     const tx = this.db.transaction(['meta', 'players', 'chunks'], 'readonly');
-    const [meta, player, chunks, adventurers] = await Promise.all([
+    const [meta, player, chunks, adventurers, society] = await Promise.all([
       req(tx.objectStore('meta').get(worldId)) as Promise<WorldMeta | undefined>,
       req(tx.objectStore('players').get(worldId)) as Promise<PlayerSave | undefined>,
       req(tx.objectStore('chunks').getAll(this.range(worldId))) as Promise<SerializedChunk[]>,
       req(tx.objectStore('players').get(`${worldId}|adventurers`)) as Promise<
         AdventurerSave[] | undefined
+      >,
+      req(tx.objectStore('players').get(`${worldId}|society`)) as Promise<
+        WorldSocietySave | undefined
       >,
     ]);
     return {
@@ -170,6 +193,7 @@ export class IdbSaveStore implements SaveStore {
       player: player && supported(player.v) ? player : null,
       chunks: chunks ?? [],
       adventurers: Array.isArray(adventurers) ? adventurers : null,
+      society: society && typeof society === 'object' ? society : null,
     };
   }
 
@@ -186,11 +210,13 @@ export class IdbSaveStore implements SaveStore {
     meta: WorldMeta,
     player: PlayerSave,
     adventurers?: readonly AdventurerSave[],
+    society?: WorldSocietySave,
   ): Promise<void> {
     const tx = this.db.transaction(['meta', 'players'], 'readwrite');
     tx.objectStore('meta').put(meta, worldId);
     tx.objectStore('players').put(player, worldId);
     if (adventurers) tx.objectStore('players').put(adventurers, `${worldId}|adventurers`);
+    if (society) tx.objectStore('players').put(society, `${worldId}|society`);
     await done(tx);
   }
 
@@ -199,6 +225,7 @@ export class IdbSaveStore implements SaveStore {
     tx.objectStore('meta').delete(worldId);
     tx.objectStore('players').delete(worldId);
     tx.objectStore('players').delete(`${worldId}|adventurers`);
+    tx.objectStore('players').delete(`${worldId}|society`);
     tx.objectStore('chunks').delete(this.range(worldId));
     await done(tx);
   }

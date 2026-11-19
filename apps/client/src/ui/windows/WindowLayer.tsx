@@ -1,8 +1,14 @@
+import type { ReactNode } from 'react';
 import type { WindowId } from '../../app/stores';
 import { useServices } from '../context';
 import { useStore } from '../hooks/useStore';
 import { closeWindow, focusWindow } from '../windowActions';
 import { AdventurerWindow } from './AdventurerWindow';
+import { DialogueWindow } from './DialogueWindow';
+import { ExchangeWindow } from './ExchangeWindow';
+import { GuildWindow } from './GuildWindow';
+import { ShopWindow } from './ShopWindow';
+import { TradeWindow } from './TradeWindow';
 import { CharacterWindow } from './CharacterWindow';
 import { RosterWindow } from './RosterWindow';
 import { InventoryWindow } from './InventoryWindow';
@@ -12,7 +18,13 @@ import { WorldMapWindow } from './WorldMapWindow';
 import { KeyGuideWindow } from './KeyGuideWindow';
 import { SettingsWindow } from './SettingsWindow';
 
-const COMPONENTS: Record<WindowId, typeof CharacterWindow> = {
+type WindowComponent = (props: {
+  onClose: () => void;
+  onFocus: () => void;
+  zIndex: number;
+}) => ReactNode;
+
+const COMPONENTS: Record<WindowId, WindowComponent> = {
   character: CharacterWindow,
   settings: SettingsWindow,
   keyGuide: KeyGuideWindow,
@@ -22,6 +34,11 @@ const COMPONENTS: Record<WindowId, typeof CharacterWindow> = {
   adventurer: AdventurerWindow,
   roster: RosterWindow,
   jobAdvance: JobAdvanceWindow,
+  dialogue: DialogueWindow,
+  shop: ShopWindow,
+  exchange: ExchangeWindow,
+  trade: TradeWindow,
+  guild: GuildWindow,
 };
 
 /** Renders open windows in focus order (last = top). */

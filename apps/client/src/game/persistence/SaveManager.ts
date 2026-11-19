@@ -48,6 +48,7 @@ export class SaveManager {
           this.sim.exportMeta(this.seed),
           this.sim.exportPlayer(),
           this.sim.exportAdventurers(),
+          this.sim.exportSociety(),
         );
       } catch (err) {
         console.error('Save failed', err);

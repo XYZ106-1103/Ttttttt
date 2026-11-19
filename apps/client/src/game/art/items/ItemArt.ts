@@ -1,4 +1,5 @@
 import { ITEM_DEFS, tileRegistry } from '@world/shared';
+import { generateCoinIcon } from '../objects/village';
 import { type Color, hex, mix, shade } from '../color';
 import { generateFlower, generateMushroom } from '../objects/flora';
 import { gearIcon } from './gearIcons';
@@ -176,6 +177,7 @@ export function generateItemIcons(ts: Tileset): Map<string, PixelCanvas> {
     }
     icons.set(def.id, icon);
   }
+  icons.set('gold', generateCoinIcon());
   return icons;
 }
 

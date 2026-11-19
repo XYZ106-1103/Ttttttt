@@ -1,4 +1,5 @@
 import type { CraftResult, EquipFail, EquipSlotId, LearnFail, StatKey, World } from '@world/shared';
+import type { TownServices } from '../game/sim/TownServices';
 
 /**
  * Commands the UI may send to the game, and read-only queries it may make.
@@ -31,6 +32,7 @@ export interface GameCommands {
   devSummon(monsterId: string): boolean;
   devGive(itemId: string, count: number): boolean;
   devHeal(): void;
+  devGold(amount: number): void;
   setMonsters(enabled: boolean): void;
 }
 
@@ -39,6 +41,16 @@ export interface GameQueries {
   getPlayerTile(): { x: number; y: number } | null;
   /** Chunk indices seen by the player (world map fog of war). */
   getExplored(): ReadonlySet<number>;
+  /** Town services (shop, exchange, talking, parties, guilds) — validated commands only. */
+  getTown(): TownServices | null;
+  /** Name of a character key ('player' or an adventurer) in the current language. */
+  nameOf(key: string): string;
+  /** Text of a conversation line spoken by an adventurer (or an NPC line key). */
+  lineText(
+    speaker: string,
+    line: string,
+    params?: Readonly<Record<string, string | number>>,
+  ): string;
 }
 
 /** Late-bound bridge: the world scene attaches its implementation once created. */
@@ -116,8 +128,24 @@ export class GameBridge implements GameCommands, GameQueries {
   devHeal(): void {
     this.impl?.devHeal();
   }
+  devGold(amount: number): void {
+    this.impl?.devGold(amount);
+  }
   setMonsters(enabled: boolean): void {
     this.impl?.setMonsters(enabled);
+  }
+  getTown(): TownServices | null {
+    return this.impl?.getTown() ?? null;
+  }
+  nameOf(key: string): string {
+    return this.impl?.nameOf(key) ?? key;
+  }
+  lineText(
+    speaker: string,
+    line: string,
+    params?: Readonly<Record<string, string | number>>,
+  ): string {
+    return this.impl?.lineText(speaker, line, params) ?? line;
   }
   getExplored(): ReadonlySet<number> {
     return this.impl?.getExplored() ?? new Set();

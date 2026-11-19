@@ -15,6 +15,7 @@ import type { CharacterView, CombatLook } from '../entities/CharacterView';
 import { CombatFx, type SlashKind } from '../fx/CombatFx';
 import { DamageNumbers } from '../render/DamageNumbers';
 import type { PointLight } from '../render/LightGrid';
+import { nameOf, socialParams, spokenText } from '../social/socialText';
 import { AdventurerRenderer } from '../render/AdventurerRenderer';
 import { MonsterRenderer } from '../render/MonsterRenderer';
 import { ProjectileRenderer } from '../render/ProjectileRenderer';
@@ -85,7 +86,12 @@ export class CombatPresenter {
     this.projectiles = new ProjectileRenderer(scene, worldLayer, overlayLayer);
     this.numbers = new DamageNumbers(scene, overlayLayer);
     this.fx = new CombatFx(scene, worldLayer, overlayLayer, labelLayer);
-    this.adventurers = new AdventurerRenderer(scene, worldLayer, labelLayer, sim.world, this.fx);
+    this.adventurers = new AdventurerRenderer(scene, worldLayer, labelLayer, sim.world, this.fx, {
+      name: (a) => nameOf(sim, a.key),
+      line: (a, line, params) => spokenText(sim, a.key, line, params),
+      params: (params) => socialParams(sim, params),
+      partyMate: (a) => sim.society.parties.same('player', a.key),
+    });
   }
 
   /** Accent color for the player's weapon trails. */

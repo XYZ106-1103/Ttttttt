@@ -95,9 +95,16 @@ export const START_ZONE: StartZoneLayout = {
   props: [
     { key: 'campfire', x: 5 },
     { key: 'signpost', x: -4 },
+    // The village square (PHASE 5): see data/npcs.ts for who stands where.
+    { key: 'guild_banner', x: -23 },
+    { key: 'shop_stall', x: -17 },
+    { key: 'merchant_stall', x: -11 },
+    { key: 'merchant_stall', x: 10 },
+    { key: 'exchange_board', x: 15 },
+    { key: 'merchant_stall', x: 23 },
   ],
   treeExclusions: [
-    [-9, 11],
+    [-28, 27],
     [46, 62],
     [72, 83],
   ],

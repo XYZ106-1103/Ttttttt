@@ -8,6 +8,7 @@ import { useStore } from '../hooks/useStore';
 export function StatusPanel() {
   const { stores } = useServices();
   const p = useStore(stores.player, (s) => s);
+  const gold = useStore(stores.economy, (s) => s.gold);
   const job = getJobDef(p.jobId);
   return (
     <div className="pw-status pw-panel pw-panel--ornate" data-testid="hud-status">
@@ -27,6 +28,9 @@ export function StatusPanel() {
         </div>
         <Gauge kind="hp" label={t('hud.hp')} value={p.hp} max={p.maxHp} />
         <Gauge kind="mp" label={t('hud.mp')} value={p.mp} max={p.maxMp} />
+        <div className="pw-status__gold" data-testid="hud-gold" title={t('hud.gold')}>
+          ◉ {t('gold.amount', { n: gold.toLocaleString() })}
+        </div>
       </div>
     </div>
   );

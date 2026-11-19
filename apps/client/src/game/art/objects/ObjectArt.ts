@@ -11,6 +11,13 @@ import {
 } from './flora';
 import { CAMPFIRE_FRAMES, generateCampfire, generateSignpost } from './props';
 import { generateBush, generateOak, generatePine } from './trees';
+import {
+  BANNER_FRAMES,
+  generateExchangeBoard,
+  generateGuildBanner,
+  generateMerchantStall,
+  generateShopStall,
+} from './village';
 
 /** Frame name convention shared by the generator and the object renderer. */
 export function objectFrameName(key: string, variant: number, frame = 0): string {
@@ -20,6 +27,7 @@ export function objectFrameName(key: string, variant: number, frame = 0): string
 /** Number of animation frames per object key (1 = static). */
 export function objectFrameCount(key: string): number {
   if (key === 'campfire') return CAMPFIRE_FRAMES;
+  if (key === 'guild_banner') return BANNER_FRAMES;
   const def = OBJECT_DEFS.find((d) => d.key === key);
   return def?.sways ? SWAY_FRAMES : 1;
 }
@@ -37,6 +45,10 @@ const GENERATORS: Record<string, Gen> = {
   mushroom: (v) => generateMushroom(v),
   campfire: (_v, f) => generateCampfire(f),
   signpost: () => generateSignpost(),
+  shop_stall: () => generateShopStall(),
+  merchant_stall: (v) => generateMerchantStall(v),
+  exchange_board: () => generateExchangeBoard(),
+  guild_banner: (_v, f) => generateGuildBanner(f),
 };
 
 /** Generate every variant/frame of every world object into one atlas. */

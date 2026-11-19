@@ -2,8 +2,10 @@ import { getJobDef, TRAITS } from '@world/shared';
 import { t } from '../../i18n';
 import { Window } from '../components/Window';
 import { ItemIcon } from '../components/ItemIcon';
+import { Button } from '../components/Button';
 import { useServices } from '../context';
 import { useStore } from '../hooks/useStore';
+import { openWindow } from '../windowActions';
 
 function ago(s: number): string {
   if (s < 60) return t('adv.agoSec', { n: Math.max(1, Math.round(s)) });
@@ -18,13 +20,18 @@ function goalText(g: { kind: string; params: Readonly<Record<string, string | nu
   return t(`adv.goal.${g.kind}`, p);
 }
 
-function memoryText(m: { kind: string; detail?: string }): string {
+function memoryText(
+  m: { kind: string; detail?: string; who?: string },
+  playerName: string,
+): string {
   let detail = m.detail ?? '';
   if (m.kind === 'crafted' || m.kind === 'goal_done') detail = t(`item.${detail}`);
-  if (m.kind === 'died' || m.kind === 'slew')
+  if (m.kind === 'died' || m.kind === 'slew' || m.kind === 'raid' || m.kind === 'boss_seen')
     detail = detail ? t(`monster.${detail}`) : t('adv.unknown');
   if (m.kind === 'job') detail = t(`job.${detail}`);
-  return t(`adv.mem.${m.kind}`, { detail });
+  const who = m.who ?? t('adv.unknown');
+  if (m.kind === 'met' && m.who && m.who !== playerName) return t('adv.mem.metWho', { who });
+  return t(`adv.mem.${m.kind}`, { detail, who });
 }
 
 /** Inspection card of one adventurer (right-click them in the world, or pick from the roster). */
@@ -35,6 +42,7 @@ export function AdventurerWindow(props: {
 }) {
   const { stores } = useServices();
   const d = useStore(stores.adventurers, (s) => s.detail);
+  const playerName = useStore(stores.player, (s) => s.name);
   const debug = useStore(stores.ui, (s) => s.debugVisible);
   return (
     <Window
@@ -52,6 +60,9 @@ export function AdventurerWindow(props: {
             <div>
               <div className="pw-advcard__name">
                 {d.name} <span className="pw-advcard__tag">AI</span>
+                {d.partyMate ? (
+                  <span className="pw-advcard__tag is-party">{t('adv.inParty')}</span>
+                ) : null}
               </div>
               <div className="pw-advcard__sub" style={{ color: getJobDef(d.jobId).color }}>
                 Lv.{d.level} {t(getJobDef(d.jobId).nameKey)} · {t(`adv.arch.${d.archetype}`)}
@@ -66,6 +77,10 @@ export function AdventurerWindow(props: {
           <div className="pw-advcard__row">
             <span>{t('adv.goal')}</span>
             <b>{d.goal ? goalText(d.goal) : '—'}</b>
+          </div>
+          <div className="pw-advcard__row">
+            <span>{t('adv.guild')}</span>
+            <b>{d.guild ?? t('adv.noGuild')}</b>
           </div>
           <div className="pw-advcard__row">
             <span>{t('adv.hp')}</span>
@@ -98,12 +113,52 @@ export function AdventurerWindow(props: {
             </span>
             <b>{t('adv.relationText', { met: d.met, helped: d.helped })}</b>
           </div>
+          <div className="pw-advcard__row">
+            <span />
+            <b>
+              {t('adv.relationLine', {
+                label: t(`rel.${d.relation}`),
+                talks: d.talks,
+                trades: d.trades,
+                raids: d.raids,
+              })}
+            </b>
+          </div>
+          <div className="pw-advcard__actions">
+            <Button
+              variant="primary"
+              disabled={!d.talkable}
+              testId="adv-talk"
+              onClick={() => {
+                stores.dialogue.set((s) => ({
+                  target: { kind: 'adventurer', key: d.key },
+                  seq: s.seq + 1,
+                }));
+                openWindow(stores, 'dialogue');
+              }}
+            >
+              {t('adv.talk')}
+            </Button>
+            {!d.talkable ? <small className="pw-note">{t('adv.talkFar')}</small> : null}
+          </div>
+          <div className="pw-advcard__label">{t('adv.social')}</div>
+          <ul className="pw-memories">
+            {d.ties.length === 0 ? <li className="pw-note">{t('adv.noSocial')}</li> : null}
+            {d.ties.map((tie) => (
+              <li key={tie.key}>
+                <span>{tie.name}</span>
+                <small className={tie.affinity < 0 ? 'is-bad' : 'is-good'}>
+                  {t(`rel.${tie.label}`)}
+                </small>
+              </li>
+            ))}
+          </ul>
           <div className="pw-advcard__label">{t('adv.memories')}</div>
           <ul className="pw-memories">
             {d.memories.length === 0 ? <li className="pw-note">{t('adv.noMemories')}</li> : null}
             {d.memories.map((m, i) => (
               <li key={i}>
-                <span>{memoryText(m)}</span>
+                <span>{memoryText(m, playerName)}</span>
                 <small>{ago(m.ago)}</small>
               </li>
             ))}

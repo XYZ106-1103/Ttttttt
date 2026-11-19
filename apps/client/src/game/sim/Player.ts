@@ -11,6 +11,7 @@ export const PLAYER_HURT_IFRAMES = HURT_IFRAMES;
 export class Player extends Character {
   constructor(id: number, name: string, x: number, y: number, movement: MovementConfig) {
     super(id, 'player', name, x, y, movement);
+    this.key = 'player';
   }
 
   exportFields(): ReturnType<Character['exportSnapshot']> {

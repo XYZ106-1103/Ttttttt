@@ -6,7 +6,13 @@ import { TILE_SIZE } from '../constants';
 import { Rng } from '../math/rng';
 import { type CollisionGrid, sweepX, sweepY } from '../physics/TileCollider';
 import type { Drop } from '../sandbox/interaction';
-import type { Character } from './Character';
+import { type Character, MAX_GOLD } from './Character';
+
+/** Drop item id for gold coins: picked up into the wallet, never into the inventory. */
+export const GOLD_DROP = 'gold';
+
+/** Whether two characters share loot (same character or same party). */
+export type AllyCheck = (a: number, b: number) => boolean;
 
 export interface DropEntity {
   readonly id: number;
@@ -43,6 +49,8 @@ export class DropSystem {
   readonly drops: DropEntity[] = [];
   private nextId = 1;
   private readonly rng: Rng;
+  /** Gold coins that despawned unclaimed since last read (ledger sink). */
+  expiredGold = 0;
 
   constructor(seed = 7) {
     this.rng = new Rng(seed);
@@ -72,10 +80,24 @@ export class DropSystem {
     }
   }
 
-  private canTake(d: DropEntity, c: Character, now: number): boolean {
+  private canTake(d: DropEntity, c: Character, now: number, allied?: AllyCheck): boolean {
     if (!c.alive || d.pickupDelay > 0) return false;
-    if (d.ownerId !== null && d.ownerId !== c.id && now < d.ownerUntil) return false;
+    if (
+      d.ownerId !== null &&
+      d.ownerId !== c.id &&
+      now < d.ownerUntil &&
+      !(allied?.(d.ownerId, c.id) ?? false)
+    )
+      return false;
+    if (d.itemId === GOLD_DROP) return c.gold < MAX_GOLD;
     return c.inventory.capacityFor(d.itemId) > 0;
+  }
+
+  /** Gold lying on the ground (part of the money supply). */
+  groundGold(): number {
+    let g = 0;
+    for (const d of this.drops) if (d.itemId === GOLD_DROP) g += d.count;
+    return g;
   }
 
   step(
@@ -83,6 +105,7 @@ export class DropSystem {
     now: number,
     grid: CollisionGrid,
     collectors: readonly Character[],
+    allied?: AllyCheck,
   ): PickupEvent[] {
     const out: PickupEvent[] = [];
     for (let i = this.drops.length - 1; i >= 0; i--) {
@@ -95,7 +118,7 @@ export class DropSystem {
       let bdx = 0;
       let bdy = 0;
       for (const c of collectors) {
-        if (!this.canTake(d, c, now)) continue;
+        if (!this.canTake(d, c, now, allied)) continue;
         const dx = c.motor.x - d.x;
         const dy = c.motor.y - c.motor.height / 2 - (d.y - DROP_SIZE / 2);
         const dist = Math.hypot(dx, dy);
@@ -107,7 +130,12 @@ export class DropSystem {
         }
       }
       if (best && bd < PICKUP_RANGE) {
-        const left = best.inventory.add(d.itemId, d.count);
+        let left: number;
+        if (d.itemId === GOLD_DROP) {
+          const take = Math.min(d.count, MAX_GOLD - best.gold);
+          best.gold += take;
+          left = d.count - take;
+        } else left = best.inventory.add(d.itemId, d.count);
         const taken = d.count - left;
         if (taken > 0) out.push({ characterId: best.id, itemId: d.itemId, count: taken });
         if (left === 0) {
@@ -139,7 +167,10 @@ export class DropSystem {
         d.x = body.x;
         d.y = body.y;
       }
-      if (d.age > DROP_LIFETIME) this.drops.splice(i, 1);
+      if (d.age > DROP_LIFETIME) {
+        if (d.itemId === GOLD_DROP) this.expiredGold += d.count;
+        this.drops.splice(i, 1);
+      }
     }
     return out;
   }

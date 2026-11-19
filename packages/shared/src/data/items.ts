@@ -78,7 +78,10 @@ export interface ItemDef {
   readonly weapon?: WeaponStats;
   readonly equip?: EquipStats;
   readonly consumable?: ConsumableStats;
-  /** Base trade value in gold (PHASE 5 economy). */
+  /**
+   * Base trade value in gold — the anchor of the economy (NPC prices, market reference prices).
+   * Crafted goods are worth about 1.35–1.4× their materials so crafting for sale pays.
+   */
   readonly value: number;
 }
 
@@ -194,10 +197,10 @@ const defs: ItemDef[] = [
   material('iron_ore', 15, 'uncommon'),
   tool('worn_pickaxe', 'common', 10, { type: 'pickaxe', power: 35, speed: 3.5, reach: 6 }),
   tool('worn_axe', 'common', 10, { type: 'axe', power: 35, speed: 3, reach: 6 }),
-  tool('copper_pickaxe', 'uncommon', 60, { type: 'pickaxe', power: 55, speed: 4.2, reach: 6.5 }),
-  tool('copper_axe', 'uncommon', 55, { type: 'axe', power: 55, speed: 3.6, reach: 6.5 }),
-  tool('iron_pickaxe', 'rare', 140, { type: 'pickaxe', power: 75, speed: 5, reach: 7 }),
-  tool('iron_axe', 'rare', 130, { type: 'axe', power: 75, speed: 4.2, reach: 7 }),
+  tool('copper_pickaxe', 'uncommon', 120, { type: 'pickaxe', power: 55, speed: 4.2, reach: 6.5 }),
+  tool('copper_axe', 'uncommon', 100, { type: 'axe', power: 55, speed: 3.6, reach: 6.5 }),
+  tool('iron_pickaxe', 'rare', 250, { type: 'pickaxe', power: 75, speed: 5, reach: 7 }),
+  tool('iron_axe', 'rare', 215, { type: 'axe', power: 75, speed: 4.2, reach: 7 }),
 
   // --- Monster materials ---------------------------------------------------------------------
   material('slime_gel', 3),
@@ -207,48 +210,48 @@ const defs: ItemDef[] = [
   material('corestone', 60, 'epic', 99),
 
   // --- Weapons (one line per weapon type and tier) ------------------------------------------
-  weapon('training_sword', 'common', 8, { type: 'sword', attack: 10, speed: 1, reqLevel: 1 }),
-  weapon('copper_sword', 'uncommon', 70, { type: 'sword', attack: 18, speed: 1, reqLevel: 5 }),
-  weapon('iron_sword', 'rare', 160, {
+  weapon('training_sword', 'common', 16, { type: 'sword', attack: 10, speed: 1, reqLevel: 1 }),
+  weapon('copper_sword', 'uncommon', 140, { type: 'sword', attack: 18, speed: 1, reqLevel: 5 }),
+  weapon('iron_sword', 'rare', 320, {
     type: 'sword',
     attack: 30,
     speed: 1.05,
     reqLevel: 12,
     bonus: { str: 2 },
   }),
-  weapon('oak_staff', 'common', 10, { type: 'staff', attack: 11, speed: 1, reqLevel: 1 }),
-  weapon('ember_staff', 'uncommon', 90, {
+  weapon('oak_staff', 'common', 22, { type: 'staff', attack: 11, speed: 1, reqLevel: 1 }),
+  weapon('ember_staff', 'uncommon', 140, {
     type: 'staff',
     attack: 21,
     speed: 1,
     reqLevel: 7,
     bonus: { int: 2, maxMp: 20 },
   }),
-  weapon('iron_staff', 'rare', 170, {
+  weapon('iron_staff', 'rare', 320, {
     type: 'staff',
     attack: 31,
     speed: 1.05,
     reqLevel: 12,
     bonus: { int: 3 },
   }),
-  weapon('oak_bow', 'common', 10, { type: 'bow', attack: 9, speed: 1, reqLevel: 1 }),
-  weapon('copper_bow', 'uncommon', 75, { type: 'bow', attack: 16, speed: 1.05, reqLevel: 5 }),
-  weapon('iron_bow', 'rare', 165, {
+  weapon('oak_bow', 'common', 20, { type: 'bow', attack: 9, speed: 1, reqLevel: 1 }),
+  weapon('copper_bow', 'uncommon', 95, { type: 'bow', attack: 16, speed: 1.05, reqLevel: 5 }),
+  weapon('iron_bow', 'rare', 230, {
     type: 'bow',
     attack: 27,
     speed: 1.1,
     reqLevel: 12,
     bonus: { dex: 2 },
   }),
-  weapon('worn_dagger', 'common', 8, { type: 'dagger', attack: 8, speed: 1, reqLevel: 1 }),
-  weapon('copper_dagger', 'uncommon', 65, {
+  weapon('worn_dagger', 'common', 16, { type: 'dagger', attack: 8, speed: 1, reqLevel: 1 }),
+  weapon('copper_dagger', 'uncommon', 105, {
     type: 'dagger',
     attack: 15,
     speed: 1.05,
     reqLevel: 5,
     bonus: { critRate: 0.03 },
   }),
-  weapon('iron_dagger', 'rare', 155, {
+  weapon('iron_dagger', 'rare', 245, {
     type: 'dagger',
     attack: 25,
     speed: 1.1,
@@ -257,18 +260,18 @@ const defs: ItemDef[] = [
   }),
 
   // --- Armor & accessories -------------------------------------------------------------------
-  gear('traveler_hood', 'common', 12, 'head', 1, { defense: 2, maxHp: 10 }),
-  gear('traveler_coat', 'common', 18, 'body', 1, { defense: 3, maxHp: 15 }),
-  gear('traveler_boots', 'common', 12, 'feet', 1, { defense: 1, moveSpeed: 0.03 }),
-  gear('copper_helmet', 'uncommon', 60, 'head', 5, { defense: 5, maxHp: 20 }),
-  gear('copper_armor', 'uncommon', 90, 'body', 5, { defense: 8, maxHp: 30 }),
-  gear('copper_greaves', 'uncommon', 55, 'feet', 5, { defense: 4, moveSpeed: 0.02 }),
-  gear('iron_helmet', 'rare', 140, 'head', 12, { defense: 9, maxHp: 40 }),
-  gear('iron_armor', 'rare', 200, 'body', 12, { defense: 14, maxHp: 60 }),
-  gear('iron_greaves', 'rare', 130, 'feet', 12, { defense: 7, moveSpeed: 0.03 }),
+  gear('traveler_hood', 'common', 20, 'head', 1, { defense: 2, maxHp: 10 }),
+  gear('traveler_coat', 'common', 30, 'body', 1, { defense: 3, maxHp: 15 }),
+  gear('traveler_boots', 'common', 18, 'feet', 1, { defense: 1, moveSpeed: 0.03 }),
+  gear('copper_helmet', 'uncommon', 110, 'head', 5, { defense: 5, maxHp: 20 }),
+  gear('copper_armor', 'uncommon', 190, 'body', 5, { defense: 8, maxHp: 30 }),
+  gear('copper_greaves', 'uncommon', 100, 'feet', 5, { defense: 4, moveSpeed: 0.02 }),
+  gear('iron_helmet', 'rare', 270, 'head', 12, { defense: 9, maxHp: 40 }),
+  gear('iron_armor', 'rare', 450, 'body', 12, { defense: 14, maxHp: 60 }),
+  gear('iron_greaves', 'rare', 250, 'feet', 12, { defense: 7, moveSpeed: 0.03 }),
   gear('thorn_charm', 'uncommon', 70, 'accessory', 3, { attack: 3, critRate: 0.02 }),
-  gear('bat_brooch', 'uncommon', 80, 'accessory', 6, { moveSpeed: 0.06, dex: 2 }),
-  gear('ember_bead', 'rare', 120, 'accessory', 9, { magic: 5, mpRegen: 1, int: 2 }),
+  gear('bat_brooch', 'uncommon', 115, 'accessory', 6, { moveSpeed: 0.06, dex: 2 }),
+  gear('ember_bead', 'rare', 200, 'accessory', 9, { magic: 5, mpRegen: 1, int: 2 }),
   gear('corestone_ring', 'epic', 400, 'accessory', 14, {
     defense: 6,
     maxHp: 80,
@@ -284,7 +287,7 @@ const defs: ItemDef[] = [
   consumable(
     'golem_heart',
     'rare',
-    150,
+    300,
     { cooldown: 2, summon: 'corestone_golem', minDepth: 30 },
     10,
   ),

@@ -24,6 +24,7 @@ export type UiAction =
   | 'quests'
   | 'worldMap'
   | 'roster'
+  | 'guild'
   | 'keyGuide'
   | 'debug'
   | 'hotbar1'
@@ -79,6 +80,7 @@ export const DEFAULT_BINDINGS: Bindings = {
   quests: ['KeyL'],
   worldMap: ['KeyM'],
   roster: ['KeyO'],
+  guild: ['KeyG'],
   keyGuide: ['F1'],
   debug: ['F3'],
   hotbar1: ['Digit1'],

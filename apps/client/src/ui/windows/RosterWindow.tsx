@@ -23,7 +23,7 @@ export function RosterWindow(props: { onClose: () => void; onFocus: () => void; 
   return (
     <Window
       title={t('window.roster')}
-      width={560}
+      width={680}
       initial={{ x: Math.max(16, window.innerWidth / 2 - 280), y: 100 }}
       testId="window-roster"
       {...props}
@@ -54,11 +54,16 @@ export function RosterWindow(props: { onClose: () => void; onFocus: () => void; 
               }}
               data-testid={`roster-${a.key}`}
             >
-              <span className="pw-roster__name">{a.name}</span>
+              <span className="pw-roster__name">
+                {a.partyMate ? '◆ ' : ''}
+                {a.name}
+              </span>
               <span>Lv.{a.level}</span>
               <span style={{ color: getJobDef(a.jobId).color }}>
                 {t(getJobDef(a.jobId).nameKey)}
               </span>
+              <span className="pw-roster__guild">{a.guild ?? '—'}</span>
+              <span className={`pw-roster__rel is-${a.relation}`}>{t(`rel.${a.relation}`)}</span>
               <span className="pw-roster__doing">{t(`adv.do.${a.doing}`)}</span>
               <span className="pw-roster__where">
                 {a.active ? t('roster.near') : t('roster.far', { x: a.x })}

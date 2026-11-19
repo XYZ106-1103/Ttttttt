@@ -28,12 +28,34 @@ import { craft } from '../sandbox/crafting';
 import { itemRegistry } from '../sandbox/ItemRegistry';
 import { COLLISION_NONE, tileRegistry } from '../world/TileRegistry';
 import type { World } from '../world/World';
+import type { Economy } from '../economy/Economy';
+import { relationLabel } from '../society/relations';
 import type { ActionId, Adventurer } from './Adventurer';
-import { chooseGoal, GOAL_TIMEOUT, goalDone } from './goals';
+import { chooseGoal, GOAL_TIMEOUT, goalDone, RAID_BOSS, RAID_SUMMON } from './goals';
 import { gearScore, type Need, planItem } from './knowledge';
 import type { NavGrid } from './nav/NavGrid';
 import { findPath, PathFollower } from './nav/pathfind';
 import { fleeThreshold, potionThreshold } from './personality';
+import { availableForTalk, partyDesire, type SocialCtx } from './social';
+import { surplusOf, tradeInTown, type TradeEvent } from './trading';
+
+/** The social and economic world as the brain sees it (provided by the director). */
+export interface BrainSocial {
+  readonly ctx: SocialCtx;
+  readonly economy: Economy;
+  /** Active adventurers (possible conversation partners). */
+  readonly peers: readonly Adventurer[];
+  /** Pixel x of the exchange in town. */
+  readonly marketX: number;
+  /** Character for a key (player or adventurer), if present in the active world. */
+  characterOf(key: string): Character | null;
+  /** Same character or same party. */
+  allied(a: number, b: number): boolean;
+  /** Ask `b` for a conversation; true if it started. */
+  requestTalk(a: Adventurer, b: Adventurer): boolean;
+  abortTalk(a: Adventurer): void;
+  readonly tradeEvents: TradeEvent[];
+}
 
 export interface BrainEnv {
   readonly world: World;
@@ -52,6 +74,8 @@ export interface BrainEnv {
   pathBudget: number;
   /** Notable things for the presentation layer and memories. */
   readonly events: BrainEvent[];
+  /** Social/economic hooks (absent in isolated tests: no talking or trading). */
+  readonly social?: BrainSocial;
 }
 
 export type BrainEvent =
@@ -201,8 +225,14 @@ export function housekeeping(
       importance: itemRegistry.get(itemId)?.rarity === 'common' ? 0.3 : 0.7,
     });
   };
-  if (a.goal?.kind === 'item') {
-    const plan = planItem((id) => c.inventory.count(id), a.goal.itemId, a.goal.count);
+  const target =
+    a.goal?.kind === 'item'
+      ? { id: a.goal.itemId, n: a.goal.count }
+      : a.goal?.kind === 'raid'
+        ? { id: RAID_SUMMON, n: 1 }
+        : null;
+  if (target) {
+    const plan = planItem((id) => c.inventory.count(id), target.id, target.n);
     for (const r of plan.craftable) if (craft(c.inventory, r.id, 1).ok) crafted(r.output.item);
   }
   if (c.inventory.count('healing_potion') < 3 && craft(c.inventory, 'healing_potion', 1).ok)
@@ -234,12 +264,20 @@ interface Perception {
   target: Monster | null;
   targetScore: number;
   needs: readonly Need[];
+  /** Best conversation partner nearby, if any. */
+  peer: Adventurer | null;
+  peerScore: number;
+  /** Party leader to stay close to (when not leading). */
+  leader: Character | null;
 }
 
 function goalNeeds(a: Adventurer): readonly Need[] {
   const g = a.goal;
+  const inv = a.character.inventory;
+  if (g?.kind === 'raid' && inv.count(RAID_SUMMON) === 0)
+    return planItem((id) => inv.count(id), RAID_SUMMON, 1).needs;
   if (!g || g.kind !== 'item') return [];
-  return planItem((id) => a.character.inventory.count(id), g.itemId, g.count).needs;
+  return planItem((id) => inv.count(id), g.itemId, g.count).needs;
 }
 
 function perceive(a: Adventurer, env: BrainEnv, needs: readonly Need[]): Perception {
@@ -253,15 +291,40 @@ function perceive(a: Adventurer, env: BrainEnv, needs: readonly Need[]): Percept
     needs.flatMap((n) => (n.source.kind === 'monster' ? [n.source.monsterId] : [])),
   );
   if (a.goal?.kind === 'slay') wantedMonsters.add(a.goal.monsterId);
+  if (a.goal?.kind === 'raid') wantedMonsters.add(RAID_BOSS);
+  const social = env.social;
+  const party = social?.ctx.society.parties.of(a.key) ?? null;
+  const allyIds = new Set<number>();
+  let leader: Character | null = null;
+  if (party && social) {
+    for (const k of party.members) {
+      const ch = social.characterOf(k);
+      if (ch) allyIds.add(ch.id);
+      if (k === party.leader && k !== a.key && ch?.alive) leader = ch;
+    }
+  }
   for (const m of env.monsters) {
     if (!m.alive) continue;
     const mc = monsterCenter(m);
     const d = Math.hypot(mc.x - me.x, mc.y - me.y);
     if (d > PERCEPTION) continue;
     const mine = m.targetId === c.id;
+    const assist = m.targetId !== null && allyIds.has(m.targetId);
     if ((mine && d < 9 * TILE_SIZE) || d < 3 * TILE_SIZE) threats.push(m);
-    if (claimedByOther(m, c.id, env.now) && !mine) continue;
-    if (m.def.boss && (c.level < m.def.level - 1 || p.courage < 0.55)) continue;
+    if (claimedByOther(m, c.id, env.now, social?.allied) && !mine) continue;
+    // Courtesy: leave the player's fight alone unless partied with them (or it turns on us).
+    const pl = env.player;
+    if (
+      pl &&
+      !mine &&
+      !m.def.boss &&
+      !allyIds.has(pl.id) &&
+      (m.targetId === pl.id || m.damageBy.has(pl.id))
+    )
+      continue;
+    const bossOk =
+      (c.level >= m.def.level - 6 && p.courage >= 0.35) || (assist && c.level >= m.def.level - 9);
+    if (m.def.boss && !bossOk) continue;
     const fit = m.level <= c.level + 1 + p.courage * 3 ? 1 : 0.15;
     const danger = 1 - a.memory.dangerNear(Math.floor(mc.x / TILE_SIZE), env.now) * p.caution;
     const s =
@@ -269,13 +332,48 @@ function perceive(a: Adventurer, env: BrainEnv, needs: readonly Need[]): Percept
       fit *
       danger *
       (wantedMonsters.has(m.def.id) ? 1.8 : 1) *
-      (mine ? 1.6 : 1);
+      (mine ? 1.6 : 1) *
+      (assist ? 1.5 : 1) *
+      (m.def.boss ? 1.4 : 1);
     if (s > targetScore) {
       targetScore = s;
       target = m;
     }
   }
-  return { threats, target, targetScore, needs };
+  const { peer, peerScore } = pickPeer(a, env);
+  return { threats, target, targetScore, needs, peer, peerScore, leader };
+}
+
+/** Someone nearby worth talking to. */
+function pickPeer(a: Adventurer, env: BrainEnv): { peer: Adventurer | null; peerScore: number } {
+  const social = env.social;
+  if (!social || env.now < a.talkAt || a.talk) return { peer: null, peerScore: 0 };
+  const c = a.character;
+  const p = a.profile.personality;
+  let peer: Adventurer | null = null;
+  let best = 0;
+  const lonely = !social.ctx.society.parties.of(a.key) && partyDesire(a) > 0.55 ? 0.15 : 0;
+  for (const b of social.peers) {
+    if (b === a || !availableForTalk(b) || env.now < b.talkAt - 20) continue;
+    const bm = b.character.motor;
+    const dx = Math.abs(bm.x - c.motor.x);
+    if (dx > 22 * TILE_SIZE || Math.abs(bm.y - c.motor.y) > 6 * TILE_SIZE) continue;
+    const rel = a.memory.relations.get(b.key);
+    if (rel && env.now - rel.lastTalk < 200) continue;
+    const label = relationLabel(rel);
+    const s =
+      (0.12 + p.sociability * 0.4) * (0.7 + p.friendliness * 0.3) +
+      (label === 'friend' || label === 'close_friend' ? 0.12 : 0) +
+      (label === 'stranger' ? p.curiosity * 0.1 : 0) +
+      (label === 'rival' || label === 'enemy' ? p.competitiveness * 0.12 - 0.1 : 0) +
+      lonely -
+      (dx / (22 * TILE_SIZE)) * 0.08;
+    if (s > best) {
+      best = s;
+      peer = b;
+    }
+  }
+  return { peer, peerScore: best };
 }
 
 // --- Utility scoring -----------------------------------------------------------------------------
@@ -322,6 +420,10 @@ function score(a: Adventurer, env: BrainEnv, per: Perception): Record<ActionId, 
       ? Math.abs(player.motor.x - c.motor.x) + Math.abs(player.motor.y - c.motor.y)
       : Infinity;
   const affinity = a.memory.relations.get('player')?.affinity ?? 0;
+  const leaderDist = per.leader
+    ? Math.abs(per.leader.motor.x - c.motor.x) + Math.abs(per.leader.motor.y - c.motor.y)
+    : 0;
+  const greetPlayer = playerGreetScore(a, env, pd, affinity);
   const s: Record<ActionId, number> = {
     fight:
       per.target === null
@@ -342,15 +444,52 @@ function score(a: Adventurer, env: BrainEnv, per: Perception): Record<ActionId, 
     return:
       (env.night && !a.profile.nightOwl && depthOf(env, c) < 4 ? 0.55 * (0.5 + p.caution) : 0) +
       (Math.abs(c.motor.x / TILE_SIZE - a.profile.homeX) > 260 ? 0.3 : 0),
-    socialize:
-      pd < 14 * TILE_SIZE && env.now - a.greetedAt > 90
-        ? (0.2 + p.friendliness * 0.45 + affinity * 0.35) * (0.5 + p.sociability)
+    socialize: Math.max(greetPlayer, per.peerScore),
+    talk: a.talk ? (threatened ? 0 : 3) : 0,
+    trade: tradeScore(a, env),
+    follow:
+      per.leader && leaderDist > 9 * TILE_SIZE
+        ? 0.72 + (leaderDist > 30 * TILE_SIZE ? 0.35 : 0) + p.friendliness * 0.1
         : 0,
     wander: 0.14,
   };
+  // A break in town: chat and browse before heading out again.
+  if (env.now < a.townUntil && !threatened && !per.leader) {
+    s.fight *= 0.4;
+    s.seek *= 0.25;
+    s.explore *= 0.25;
+    s.gather *= 0.5;
+    s.mine *= 0.5;
+    s.wander += 0.25;
+    if (s.socialize > 0) s.socialize += 0.4;
+  }
   // Light noise so equally placed adventurers do not all act alike.
   for (const k of Object.keys(s) as ActionId[]) if (s[k] > 0) s[k] *= 0.94 + a.rng.next() * 0.12;
   return s;
+}
+
+function playerGreetScore(a: Adventurer, env: BrainEnv, pd: number, affinity: number): number {
+  const p = a.profile.personality;
+  return pd < 14 * TILE_SIZE && env.now - a.greetedAt > 90
+    ? (0.2 + p.friendliness * 0.45 + affinity * 0.35) * (0.5 + p.sociability)
+    : 0;
+}
+
+function tradeScore(a: Adventurer, env: BrainEnv): number {
+  const social = env.social;
+  if (!social) return 0;
+  const c = a.character;
+  const p = a.profile.personality;
+  if (a.profile.archetype === 'merchant') return env.night ? 0.3 : 0.92;
+  if (env.now < a.tradeAt) return 0;
+  let sc = 0;
+  const surplus = surplusOf(a).reduce((n, o) => n + o.price * o.count, 0);
+  if (surplus >= 80) sc += 0.28 + p.greed * 0.2;
+  const mail = social.economy.market.peekMail(a.key);
+  if (mail && (mail.gold > 0 || mail.items.length > 0)) sc += 0.25;
+  if (c.inventory.count('healing_potion') < 3 && c.gold >= 40) sc += 0.35;
+  if (c.inventory.freeSlots() < 5) sc += 0.35;
+  return sc * (0.8 + p.greed * 0.4);
 }
 
 // --- Movement helpers ----------------------------------------------------------------------------
@@ -722,6 +861,15 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
   const needs = goalNeeds(a);
   const per = perceive(a, env, needs);
 
+  // The player is talking to us: stop and face them (unless something is attacking).
+  if (now < a.listenUntil && env.player && per.threats.length === 0) {
+    const pm = env.player.motor;
+    c.facing = pm.x >= c.motor.x ? 1 : -1;
+    if (c.selectedSlot !== 0) c.select(0);
+    out.action = { ...out.action, aimX: pm.x, aimY: pm.y - 22 };
+    return { move: IDLE_INPUT, use: null, action: out.action };
+  }
+
   // Tactics: re-score twice a second, commit with hysteresis.
   if (now >= a.thinkAt) {
     a.thinkAt = now + 0.45 + a.rng.next() * 0.15;
@@ -734,6 +882,16 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
         best = k;
         bestScore = s[k];
       }
+    }
+    if (a.talk && best !== 'talk') env.social?.abortTalk(a);
+    if (best === 'socialize') {
+      const pl = env.player;
+      const pd =
+        pl && pl.alive
+          ? Math.abs(pl.motor.x - c.motor.x) + Math.abs(pl.motor.y - c.motor.y)
+          : Infinity;
+      const greet = playerGreetScore(a, env, pd, a.memory.relations.get('player')?.affinity ?? 0);
+      a.talkTarget = per.peer && per.peerScore >= greet ? per.peer.key : null;
     }
     if (best !== a.action) {
       a.action = best;
@@ -778,6 +936,12 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
       mine(a, env, per, out);
       break;
     case 'seek': {
+      const lead = partyLeaderAdventurer(a, env);
+      if (lead) {
+        const lm = lead.character.motor;
+        out.move = travel(a, env, lm.x, lm.y, 2);
+        break;
+      }
       if (a.travelX === null) a.travelX = huntingGround(a, env);
       const pt = surfacePoint(env, a.travelX);
       out.move = travel(a, env, pt.x, pt.y, 2);
@@ -802,7 +966,57 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
         Math.abs(pt.x - c.motor.x) > 2 * TILE_SIZE ? travel(a, env, pt.x, pt.y, 2) : IDLE_INPUT;
       break;
     }
+    case 'talk': {
+      const conv = a.talk;
+      if (!conv) {
+        a.action = 'wander';
+        break;
+      }
+      const other = conv.a === a ? conv.b : conv.a;
+      const om = other.character.motor;
+      out.move =
+        Math.abs(om.x - c.motor.x) > 3 * TILE_SIZE ? steerTo(env, c, om.x, om.y) : IDLE_INPUT;
+      out.action = { ...out.action, aimX: om.x, aimY: om.y - 22 };
+      if (Math.abs(om.x - c.motor.x) > 1) c.facing = om.x > c.motor.x ? 1 : -1;
+      break;
+    }
+    case 'trade':
+      tradeAction(a, env, out);
+      break;
+    case 'follow': {
+      const lead = per.leader;
+      if (!lead) {
+        a.action = 'wander';
+        break;
+      }
+      const side = Math.sign(c.motor.x - lead.motor.x) || 1;
+      out.move = travel(a, env, lead.motor.x + side * 2.5 * TILE_SIZE, lead.motor.y, 2);
+      break;
+    }
     case 'socialize': {
+      const peer = a.talkTarget ? env.social?.peers.find((b) => b.key === a.talkTarget) : null;
+      if (peer && env.social) {
+        const pm = peer.character.motor;
+        const dx = pm.x - c.motor.x;
+        if (!availableForTalk(peer)) {
+          a.talkTarget = null;
+          a.talkAt = now + 20;
+          a.action = 'wander';
+          break;
+        }
+        out.move =
+          Math.abs(dx) > 2.5 * TILE_SIZE
+            ? travel(a, env, pm.x - Math.sign(dx) * 2 * TILE_SIZE, pm.y, 1)
+            : IDLE_INPUT;
+        if (Math.abs(dx) <= 3 * TILE_SIZE && Math.abs(pm.y - c.motor.y) < 3 * TILE_SIZE) {
+          a.talkTarget = null;
+          if (!env.social.requestTalk(a, peer)) {
+            a.talkAt = now + 45;
+            a.action = 'wander';
+          }
+        }
+        break;
+      }
       const pl = env.player;
       if (!pl || !pl.alive) {
         a.action = 'wander';
@@ -835,7 +1049,10 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
     }
     case 'wander': {
       if (a.travelX === null || Math.abs(a.travelX - c.motor.x) < 8 || a.stuckFor > 2) {
-        a.travelX = c.motor.x + a.rng.range(-10, 10) * TILE_SIZE;
+        // In town people stroll around the square; elsewhere, nearby.
+        const around =
+          now < a.townUntil && env.social ? env.social.marketX - 6 * TILE_SIZE : c.motor.x;
+        a.travelX = around + a.rng.range(-10, 10) * TILE_SIZE;
         a.stuckFor = 0;
       }
       if (now - a.actionSince > 1 && a.rng.chance(0.004)) a.actionSince = now + 2;
@@ -857,12 +1074,58 @@ export function thinkAdventurer(a: Adventurer, env: BrainEnv): CharacterIntent {
     out.use === null &&
     a.action !== 'fight' &&
     c.selectedSlot !== 0 &&
-    (a.action === 'wander' || a.action === 'socialize' || a.action === 'return')
+    (a.action === 'wander' ||
+      a.action === 'socialize' ||
+      a.action === 'return' ||
+      a.action === 'talk' ||
+      a.action === 'trade' ||
+      a.action === 'follow')
   )
     c.select(0);
   if (out.action.aimX === 0 && out.action.aimY === 0)
     out.action = { ...out.action, aimX: c.motor.x, aimY: c.motor.y };
   return { move: out.move, use: out.use, action: out.action };
+}
+
+/** The adventurer leading `a`'s party (if another adventurer leads it). */
+function partyLeaderAdventurer(a: Adventurer, env: BrainEnv): Adventurer | null {
+  const social = env.social;
+  const party = social?.ctx.society.parties.of(a.key);
+  if (!social || !party || party.leader === a.key) return null;
+  return social.ctx.byKey(party.leader) ?? null;
+}
+
+/** Walk to the exchange (or one's stall) and trade there. */
+function tradeAction(a: Adventurer, env: BrainEnv, out: Out): void {
+  const social = env.social;
+  if (!social) {
+    a.action = 'wander';
+    return;
+  }
+  const c = a.character;
+  const merchant = a.profile.archetype === 'merchant';
+  const spotX =
+    merchant && a.profile.stallX !== undefined
+      ? a.profile.stallX * TILE_SIZE + 8
+      : social.marketX + ((a.profile.index % 5) - 2) * 1.5 * TILE_SIZE;
+  const pt = surfacePoint(env, spotX);
+  if (Math.abs(pt.x - c.motor.x) > 1.5 * TILE_SIZE) {
+    out.move = travel(a, env, pt.x, pt.y, 1);
+    return;
+  }
+  out.move = IDLE_INPUT;
+  if (env.now >= a.tradeAt) {
+    tradeInTown(a, social.economy, env.now, social.tradeEvents);
+    a.tradeAt = env.now + (merchant ? 40 + a.rng.range(0, 20) : 240 + a.rng.range(0, 200));
+    if (!merchant) {
+      a.thinkAt = env.now + 2.5;
+      a.townUntil = env.now + 25 + a.profile.personality.sociability * 60;
+    }
+  }
+  if (merchant) {
+    c.facing = a.profile.index % 2 === 0 ? 1 : -1;
+    if (a.rng.chance(0.002)) a.say('stall', env.now);
+  }
 }
 
 /** Does the plan need anything that only mining provides? (used by the abstract simulation) */

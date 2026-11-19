@@ -37,6 +37,8 @@ export interface AdventurerProfile {
   readonly dislikesCaves: boolean;
   /** Home tile column (in the starting village). */
   readonly homeX: number;
+  /** Market stall tile column (merchants only). */
+  readonly stallX?: number;
 }
 
 export type ActionId =
@@ -49,6 +51,9 @@ export type ActionId =
   | 'explore'
   | 'return'
   | 'socialize'
+  | 'talk'
+  | 'trade'
+  | 'follow'
   | 'wander';
 
 export const ACTION_IDS: readonly ActionId[] = [
@@ -61,16 +66,49 @@ export const ACTION_IDS: readonly ActionId[] = [
   'explore',
   'return',
   'socialize',
+  'talk',
+  'trade',
+  'follow',
   'wander',
 ];
 
 /** Coarse activity of an adventurer simulated off-screen. */
-export type AbstractActivity = 'town' | 'hunt' | 'mine' | 'gather' | 'travel' | 'rest';
+export type AbstractActivity = 'town' | 'hunt' | 'mine' | 'gather' | 'travel' | 'rest' | 'raid';
+const ACTIVITIES: readonly AbstractActivity[] = [
+  'town',
+  'hunt',
+  'mine',
+  'gather',
+  'travel',
+  'rest',
+  'raid',
+];
 
 export interface Bark {
   readonly key: string;
   readonly params?: Readonly<Record<string, string | number>>;
   readonly until: number;
+  /** A conversation line (`talk.*` text) rather than a one-off bark (`bark.*`). */
+  readonly talk?: boolean;
+}
+
+/** One line of a planned conversation; `apply` runs when the line is spoken. */
+export interface ConvLine {
+  /** Speaker key. */
+  readonly speaker: string;
+  /** Line id (client text: talk.<tone|register>.<line>). */
+  readonly line: string;
+  readonly params?: Readonly<Record<string, string | number>>;
+  readonly apply?: () => void;
+}
+
+export interface Conversation {
+  readonly id: number;
+  readonly a: Adventurer;
+  readonly b: Adventurer;
+  readonly lines: readonly ConvLine[];
+  index: number;
+  nextAt: number;
 }
 
 export interface FrameFx {
@@ -146,6 +184,26 @@ export class Adventurer {
   bark: Bark | null = null;
   nextBarkAt = 0;
   respawnAt = -Infinity;
+  /** Conversation in progress (active tier). */
+  talk: Conversation | null = null;
+  /** Earliest time for the next self-started conversation. */
+  talkAt = -Infinity;
+  /** Adventurer key this one is walking over to talk to. */
+  talkTarget: string | null = null;
+  /** Earliest time for the next market visit. */
+  tradeAt = -Infinity;
+  /** Lingering in town (chatting, browsing) until then, before heading out again. */
+  townUntil = -Infinity;
+  /** The player is talking to this adventurer until then: stand still and listen. */
+  listenUntil = -Infinity;
+  /** When a companion leaves the player's party to get back to their own life. */
+  partyUntil = Infinity;
+  /** Social housekeeping timer (guilds, parties). */
+  socialAt = -Infinity;
+  /** Items that came back unsold from the market (asks go down a little each time). */
+  readonly unsold = new Map<string, number>();
+  /** Memory timestamps already told to someone (no repeating the same news). */
+  readonly toldNews = new Set<number>();
   /** Accumulated motor events for the renderer (reset when consumed). */
   readonly fx: FrameFx = { jumped: false, landed: false, landingSpeed: 0, stepped: 0 };
 
@@ -162,6 +220,7 @@ export class Adventurer {
     movement: MovementConfig,
   ) {
     this.character = new Character(id, 'adventurer', profile.name.ko, x, y, movement);
+    this.character.key = profile.key;
     this.character.giveStartingItems();
     this.rng = new Rng(deriveSeed(profile.seed, 'brain'));
   }
@@ -172,8 +231,15 @@ export class Adventurer {
 
   say(key: string, now: number, params?: Record<string, string | number>, force = false): void {
     if (!force && now < this.nextBarkAt) return;
+    if (this.talk && !force) return;
     this.bark = { key, params, until: now + 3.2 };
     this.nextBarkAt = now + 7 + this.rng.range(0, 6) * (1 - this.profile.personality.sociability);
+  }
+
+  /** Speak a conversation line (shown as a bubble and in nearby chat). */
+  sayLine(line: string, now: number, params?: Readonly<Record<string, string | number>>): void {
+    this.bark = { key: line, params, until: now + 2.9, talk: true };
+    this.nextBarkAt = now + 5;
   }
 
   toJSON(): AdventurerSave {
@@ -196,11 +262,7 @@ export class Adventurer {
     }
     this.memory.load(s.memory);
     this.goal = sanitizeGoal(s.goal);
-    this.activity = (['town', 'hunt', 'mine', 'gather', 'travel', 'rest'] as const).includes(
-      s.activity,
-    )
-      ? s.activity
-      : 'town';
+    this.activity = ACTIVITIES.includes(s.activity) ? s.activity : 'town';
   }
 }
 
@@ -220,6 +282,14 @@ function sanitizeGoal(g: unknown): Goal | null {
     case 'explore':
       return Number.isFinite(Number(o.targetX))
         ? { kind: 'explore', targetX: Number(o.targetX), since }
+        : null;
+    case 'wealth':
+      return Number.isFinite(Number(o.target))
+        ? { kind: 'wealth', target: Number(o.target), since }
+        : null;
+    case 'raid':
+      return typeof o.monsterId === 'string'
+        ? { kind: 'raid', monsterId: o.monsterId, done: o.done === true, since }
         : null;
     case 'slay':
       return typeof o.monsterId === 'string'

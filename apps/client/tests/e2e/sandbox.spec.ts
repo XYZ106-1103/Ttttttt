@@ -106,15 +106,26 @@ test.describe('PROJECT WORLD — PHASE 2 sandbox', () => {
   });
 
   test('chops a tree for wood and crafts planks in the inventory window', async ({ page }) => {
-    const s0 = await play(page);
-    const sx = Math.floor(s0.x / 16);
-    const gy = Math.round(s0.y / 16);
-    await chat(page, `/tp ${sx - 12} ${gy}`);
+    await play(page);
+    // This test is about chopping: no monsters wandering in.
+    await chat(page, '/peace');
+    // The village square has no trees: walk to the nearest one.
+    const tree = await page.evaluate(() =>
+      (
+        window as unknown as { __PW__: { nearest(p: string): { tx: number; ty: number } | null } }
+      ).__PW__.nearest('tree_'),
+    );
+    expect(tree).not.toBeNull();
+    if (!tree) return;
+    const gy = tree.ty + 1;
+    await chat(page, `/tp ${tree.tx - 2} ${gy - 3}`);
+    // Land and let the camera settle before aiming.
+    await page.waitForTimeout(2000);
     await page.keyboard.press('Digit2'); // worn axe
-    const s = await snap(page);
     let wood = 0;
-    for (let dx = -5; dx <= 5 && wood === 0; dx++) {
-      const p = screenOf(Math.floor(s.x / 16) + dx, gy - 3, s);
+    for (let dx = 0; dx <= 4 && wood === 0; dx++) {
+      const s = await snap(page);
+      const p = screenOf(tree.tx + (dx % 2 === 0 ? dx / 2 : -(dx + 1) / 2), gy - 3, s);
       await page.mouse.move(p.x, p.y);
       await page.mouse.down();
       await page

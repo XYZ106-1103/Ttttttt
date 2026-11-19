@@ -67,9 +67,23 @@ export function claimMonster(m: Monster, characterId: number, now: number): void
   }
 }
 
-/** True if another character holds a live claim on this monster. */
-export function claimedByOther(m: Monster, characterId: number, now: number): boolean {
-  return m.ownerId !== null && m.ownerId !== characterId && now <= m.ownerUntil;
+/**
+ * True if another character (not a party ally) holds a live claim on this monster. Bosses are
+ * never exclusive: anyone may join the fight.
+ */
+export function claimedByOther(
+  m: Monster,
+  characterId: number,
+  now: number,
+  allied?: (a: number, b: number) => boolean,
+): boolean {
+  if (m.def.boss) return false;
+  return (
+    m.ownerId !== null &&
+    m.ownerId !== characterId &&
+    now <= m.ownerUntil &&
+    !(allied?.(m.ownerId, characterId) ?? false)
+  );
 }
 
 export function monsterMovement(def: MonsterDef): MovementConfig {

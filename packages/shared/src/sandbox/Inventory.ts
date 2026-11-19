@@ -53,6 +53,13 @@ export class Inventory {
     return Number.isInteger(i) && i >= 0 && i < this.size;
   }
 
+  /** Number of empty slots. */
+  freeSlots(): number {
+    let n = 0;
+    for (let i = 0; i < this.size; i++) if (!this.get(i)) n++;
+    return n;
+  }
+
   count(itemId: string): number {
     let n = 0;
     for (const s of this.slots) if (s && s.itemId === itemId) n += s.count;

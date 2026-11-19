@@ -13,7 +13,13 @@ export type MemoryKind =
   | 'goal_done'
   | 'fled'
   | 'slew'
-  | 'boss_seen';
+  | 'boss_seen'
+  | 'talked'
+  | 'traded'
+  | 'party'
+  | 'raid'
+  | 'guild'
+  | 'quarrel';
 
 export interface MemoryEvent {
   /** World time (s). */
@@ -35,6 +41,30 @@ export interface Relation {
   met: number;
   helped: number;
   lastSeen: number;
+  /** Conversations held. */
+  talks: number;
+  /** Trades made with each other. */
+  trades: number;
+  /** Parties formed together. */
+  parties: number;
+  /** Bosses fought together. */
+  raids: number;
+  /** World time of the last conversation. */
+  lastTalk: number;
+}
+
+export function newRelation(): Relation {
+  return {
+    affinity: 0,
+    met: 0,
+    helped: 0,
+    lastSeen: -1,
+    talks: 0,
+    trades: 0,
+    parties: 0,
+    raids: 0,
+    lastTalk: -1e9,
+  };
 }
 
 const MAX_EVENTS = 60;
@@ -70,7 +100,7 @@ export class Memory {
   relation(subject: string): Relation {
     let r = this.relations.get(subject);
     if (!r) {
-      r = { affinity: 0, met: 0, helped: 0, lastSeen: -1 };
+      r = newRelation();
       this.relations.set(subject, r);
     }
     return r;
@@ -120,11 +150,17 @@ export class Memory {
       for (const pair of d.relations) {
         if (!Array.isArray(pair) || typeof pair[0] !== 'string' || !pair[1]) continue;
         const r = pair[1] as Record<string, unknown>;
+        const count = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
         this.relations.set(pair[0], {
           affinity: Math.max(-1, Math.min(1, Number(r.affinity) || 0)),
-          met: Math.max(0, Math.floor(Number(r.met) || 0)),
-          helped: Math.max(0, Math.floor(Number(r.helped) || 0)),
+          met: count(r.met),
+          helped: count(r.helped),
           lastSeen: Number(r.lastSeen) || -1,
+          talks: count(r.talks),
+          trades: count(r.trades),
+          parties: count(r.parties),
+          raids: count(r.raids),
+          lastTalk: Number.isFinite(Number(r.lastTalk)) ? Number(r.lastTalk) : -1e9,
         });
       }
     }

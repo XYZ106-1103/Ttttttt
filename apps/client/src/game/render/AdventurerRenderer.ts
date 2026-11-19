@@ -16,6 +16,17 @@ import { createFrameEvents, resetFrameEvents } from '../entities/FrameEvents';
 import type { CombatFx } from '../fx/CombatFx';
 import { CharacterTextureQueue } from './CharacterTextureQueue';
 
+/** Display text for adventurers (names and speech in the player's language). */
+export interface AdventurerText {
+  name(a: Adventurer): string;
+  /** A conversation line (`talk.*`). */
+  line(a: Adventurer, line: string, params?: Readonly<Record<string, string | number>>): string;
+  /** Params of a one-off bark with ids resolved. */
+  params(params?: Readonly<Record<string, string | number>>): Record<string, string | number>;
+  /** Is this adventurer in the player's party (green tag)? */
+  partyMate(a: Adventurer): boolean;
+}
+
 interface AdventurerSprite {
   readonly view: CharacterView;
   readonly bubble: Phaser.GameObjects.Text;
@@ -38,6 +49,7 @@ export class AdventurerRenderer {
     private readonly labelLayer: Phaser.GameObjects.Layer,
     private readonly world: World,
     private readonly fx: CombatFx,
+    private readonly text: AdventurerText,
   ) {
     this.textures = new CharacterTextureQueue(scene);
   }
@@ -52,7 +64,7 @@ export class AdventurerRenderer {
       this.worldLayer,
       this.labelLayer,
       a.key,
-      a.profile.name.ko,
+      this.text.name(a),
       this.world,
     );
     const bubble = this.scene.make.text(
@@ -171,8 +183,10 @@ export class AdventurerRenderer {
       a.fx.landingSpeed = 0;
       a.fx.stepped = 0;
       const job = getJobDef(c.jobId);
-      s.view.setName(`Lv.${c.level} ${a.profile.name.ko}`);
-      s.view.setTagColor(job.id === 'novice' ? '#e8e2d4' : job.color);
+      s.view.setName(`Lv.${c.level} ${this.text.name(a)}`);
+      s.view.setTagColor(
+        this.text.partyMate(a) ? '#8df08a' : job.id === 'novice' ? '#e8e2d4' : job.color,
+      );
       const held = c.inventory.get(c.selectedSlot)?.itemId ?? null;
       s.view.setHeldItem(held);
       const look: CombatLook = {
@@ -197,20 +211,38 @@ export class AdventurerRenderer {
         const key = `${bark.key}:${bark.until}`;
         if (s.bubbleKey !== key) {
           s.bubbleKey = key;
-          const params: Record<string, string | number> = { ...(bark.params ?? {}) };
-          if (typeof params.job === 'string') params.job = t(`job.${params.job}`);
-          params.name = a.profile.name.ko;
-          s.bubble.setText(t(`bark.${toneOf(a.profile.personality)}.${bark.key}`, params));
+          if (bark.talk) s.bubble.setText(this.text.line(a, bark.key, bark.params));
+          else {
+            const params = this.text.params(bark.params);
+            params.name = this.text.name(a);
+            s.bubble.setText(t(`bark.${toneOf(a.profile.personality)}.${bark.key}`, params));
+          }
         }
         const anchor = s.view.tagAnchor;
         s.bubble.setVisible(true).setPosition(anchor.x, Math.round((y - 50) * zoom));
       } else s.bubble.setVisible(false);
     }
+    this.unstackTags();
     for (const [key, s] of this.views) {
       if (seen.has(key)) continue;
       s.view.destroy();
       s.bubble.destroy();
       this.views.delete(key);
+    }
+  }
+
+  /** In a crowd, name tags that would overlap are stacked into rows below each other. */
+  private unstackTags(): void {
+    const tags = [...this.views.values()]
+      .map((s) => ({ s, b: s.view.tagBounds }))
+      .sort((x, y) => x.b.left - y.b.left);
+    const rows: { right: number; y: number }[][] = [];
+    for (const { s, b } of tags) {
+      let row = 0;
+      while (row < 3 && (rows[row] ?? []).some((r) => r.right > b.left && Math.abs(r.y - b.y) < 24))
+        row++;
+      (rows[row] ??= []).push({ right: b.right + 2, y: b.y });
+      s.view.stackTag(row);
     }
   }
 

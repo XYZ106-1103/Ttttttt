@@ -1,8 +1,6 @@
 import Phaser from 'phaser';
 import {
-  type Adventurer,
   CHUNK_PIXELS,
-  toneOf,
   HAND_SPEED,
   HOTBAR_SIZE,
   itemRegistry,
@@ -26,9 +24,10 @@ import { ParticleFx } from '../fx/ParticleFx';
 import { InteractionController } from '../interaction/InteractionController';
 import { CombatPresenter } from '../combat/CombatPresenter';
 import { SKILL_ACTIONS } from '../../input/keybindings';
-import type { AdventurerDetail, AdventurerSummary } from '../../app/stores';
 import { openWindow } from '../../ui/windowActions';
 import { SaveManager } from '../persistence/SaveManager';
+import { SocialPresenter } from '../social/SocialPresenter';
+import { nameOf, spokenText } from '../social/socialText';
 import { EMPTY_SAVE } from '../persistence/SaveStore';
 import { ChunkRenderer, type ViewRect } from '../render/ChunkRenderer';
 import { DropRenderer } from '../render/DropRenderer';
@@ -95,10 +94,10 @@ export class WorldScene extends Phaser.Scene {
   private torches!: TorchRenderer;
   private saves!: SaveManager;
   private combatView!: CombatPresenter;
+  private social!: SocialPresenter;
   private publishedPlayerVersion = -1;
   private publishedEquipVersion = -1;
   private playerPublishTimer = 0;
-  private advTimer = 0;
 
   private zoom = 2;
   private viewW = 960;
@@ -208,6 +207,7 @@ export class WorldScene extends Phaser.Scene {
       this.cameraCtl,
       stores,
     );
+    this.social = new SocialPresenter(this, this.worldLayer, this.labelLayer, this.sim, stores);
     this.saves = new SaveManager(this.services.saveStore, this.sim, seed);
 
     this.onResize();
@@ -254,6 +254,7 @@ export class WorldScene extends Phaser.Scene {
         this.sim.player.inventory.add(id, Math.max(1, Math.min(999, Math.floor(n))));
         return true;
       },
+      devGold: (n) => this.sim.devGold(n),
       devHeal: () => {
         const p = this.sim.player;
         if (!p.alive) return;
@@ -265,6 +266,9 @@ export class WorldScene extends Phaser.Scene {
         if (!on) this.sim.monsters.clear();
       },
       getWorld: () => this.sim.world,
+      getTown: () => (this.mode === 'playing' ? this.sim.town : null),
+      nameOf: (key) => nameOf(this.sim, key),
+      lineText: (speaker, line, params) => spokenText(this.sim, speaker, line, params),
       getExplored: () => this.sim.explored,
       getPlayerTile: () => ({
         x: Math.floor(this.sim.player.motor.x / TILE_SIZE),
@@ -290,82 +294,13 @@ export class WorldScene extends Phaser.Scene {
     if (p.button !== 2 || this.mode !== 'playing') return;
     const wx = this.view.left + p.x / this.zoom;
     const wy = this.view.top + p.y / this.zoom;
+    if (this.social.onRightClick(wx, wy)) return;
     const a = this.combatView.adventurers.pick(this.sim.adventurers.active, wx, wy);
     if (!a) return;
     this.services.stores.adventurers.set({ selected: a.key });
     openWindow(this.services.stores, 'adventurer');
-    this.publishAdventurers(true);
+    this.social.publishAdventurers(true);
   };
-
-  /** Roster and the inspected adventurer's card (2 Hz). */
-  private publishAdventurers(force = false): void {
-    const { stores } = this.services;
-    const ui = stores.ui.get();
-    const visible = ui.windows.includes('adventurer') || ui.windows.includes('roster');
-    this.advTimer -= 1 / 60;
-    if (!force && (!visible || this.advTimer > 0)) return;
-    this.advTimer = 0.5;
-    const now = this.sim.time;
-    const spawnX = this.sim.world.generator.spawnTileX;
-    const summary = (a: Adventurer): AdventurerSummary => {
-      const c = a.character;
-      return {
-        key: a.key,
-        name: a.profile.name.ko,
-        level: c.level,
-        jobId: c.jobId,
-        archetype: a.profile.archetype,
-        active: a.tier === 'active',
-        doing: !c.alive ? 'dead' : a.tier === 'active' ? a.action : `abstract_${a.activity}`,
-        hp: Math.ceil(c.hp),
-        maxHp: c.stats.maxHp,
-        alive: c.alive,
-        x: Math.floor(c.motor.x / TILE_SIZE) - spawnX,
-        affinity: a.memory.relations.get('player')?.affinity ?? 0,
-      };
-    };
-    const list = this.sim.adventurers.all.map(summary);
-    const key = stores.adventurers.get().selected;
-    const a = key ? this.sim.adventurers.byKey(key) : undefined;
-    let detail: AdventurerDetail | null = null;
-    if (a) {
-      const g = a.goal;
-      const rel = a.memory.relations.get('player');
-      detail = {
-        ...summary(a),
-        personality: a.profile.personality,
-        tone: toneOf(a.profile.personality),
-        skill: a.profile.skill,
-        preferredJob: a.profile.preferredJob,
-        nightOwl: a.profile.nightOwl,
-        goal: g
-          ? {
-              kind: g.kind,
-              params:
-                g.kind === 'level'
-                  ? { level: g.target }
-                  : g.kind === 'item'
-                    ? { item: g.itemId, count: g.count }
-                    : g.kind === 'slay'
-                      ? { monster: g.monsterId, n: g.progress, count: g.count }
-                      : { x: Math.round(g.targetX - spawnX) },
-            }
-          : null,
-        memories: a.memory
-          .recall(now, 6)
-          .map((m) => ({ kind: m.kind, detail: m.detail, ago: now - m.t })),
-        scores: Object.entries(a.scores)
-          .map(([k, v]) => [k, Math.round((v ?? 0) * 100) / 100] as const)
-          .sort((x, y) => y[1] - x[1]),
-        met: rel?.met ?? 0,
-        helped: rel?.helped ?? 0,
-        weapon: a.character.heldWeapon()
-          ? (a.character.inventory.get(a.character.selectedSlot)?.itemId ?? null)
-          : null,
-      };
-    }
-    stores.adventurers.set({ list, detail });
-  }
 
   private bounds(): { width: number; height: number } {
     return { width: this.sim.world.widthPixels, height: this.sim.world.heightPixels };
@@ -660,7 +595,7 @@ export class WorldScene extends Phaser.Scene {
       this.saves.update(dt);
       this.trackExplored(dt, view);
       this.combatView.publish(dt);
-      this.publishAdventurers();
+      this.social.update(dt, this.zoom);
     }
     this.evictFarChunks(dt, view);
     this.publish(dt);
@@ -943,6 +878,36 @@ export class WorldScene extends Phaser.Scene {
     }));
   }
 
+  /** Test hook: where an NPC is on screen (CSS pixels) and whether the player can use it. */
+  debugNpc(id: string): { x: number; y: number; near: boolean } | null {
+    const n = this.sim.town.npc(id);
+    if (!n) return null;
+    return {
+      x: (n.x - this.view.left) * this.zoom,
+      y: (n.y - 20 - this.view.top) * this.zoom,
+      near: this.sim.town.near(id),
+    };
+  }
+
+  /** Test hook: the nearest world object whose key starts with `prefix` (anchor tile). */
+  debugNearestObject(prefix: string): { tx: number; ty: number } | null {
+    const p = this.sim.player.motor;
+    const ptx = Math.floor(p.x / TILE_SIZE);
+    const pcx = Math.floor(ptx / 32);
+    const pcy = Math.floor(p.y / TILE_SIZE / 32);
+    let best: { tx: number; ty: number } | null = null;
+    for (let cy = pcy - 2; cy <= pcy + 2; cy++)
+      for (let cx = pcx - 4; cx <= pcx + 4; cx++) {
+        if (!this.sim.world.inChunkBounds(cx, cy)) continue;
+        for (const o of this.sim.world.objectsInChunk(cx, cy)) {
+          if (!o.key.startsWith(prefix)) continue;
+          if (!best || Math.abs(o.tx - ptx) < Math.abs(best.tx - ptx))
+            best = { tx: o.tx, ty: o.ty };
+        }
+      }
+    return best;
+  }
+
   /** Test hook: spawn a monster near the player. */
   debugSummon(id: string): boolean {
     return this.sim.devSpawn(id);
@@ -990,6 +955,7 @@ export class WorldScene extends Phaser.Scene {
     this.torches.destroy();
     this.lightmap.destroy();
     this.combatView.destroy();
+    this.social.destroy();
     this.player.destroy();
   }
 }

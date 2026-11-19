@@ -77,9 +77,15 @@ export class MonsterManager {
     this.monsters.length = 0;
   }
 
-  private nearestTarget(m: Monster, players: readonly Combatant[]): Combatant | null {
+  /** Who the monster goes after: whoever claimed it (attacked it first), else the nearest. */
+  private nearestTarget(m: Monster, players: readonly Combatant[], now: number): Combatant | null {
     let best: Combatant | null = null;
     let bd = (m.def.boss ? 60 : m.def.aggroRange * 2) * TILE_SIZE;
+    if (m.ownerId !== null && now <= m.ownerUntil && !m.def.boss) {
+      const owner = players.find((p) => p.id === m.ownerId && p.alive);
+      if (owner && Math.hypot(owner.body.x - m.motor.x, owner.body.y - m.motor.y) < bd)
+        return owner;
+    }
     for (const p of players) {
       if (!p.alive) continue;
       const d = Math.hypot(p.body.x - m.motor.x, p.body.y - m.motor.y);
@@ -130,7 +136,7 @@ export class MonsterManager {
         continue;
       }
 
-      const target = this.nearestTarget(m, players);
+      const target = this.nearestTarget(m, players, now);
       m.targetId = target?.id ?? null;
       const ctx: BrainContext = { ...ctxBase, target };
       const input = stepBrain(m, ctx);

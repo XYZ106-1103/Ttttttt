@@ -56,7 +56,11 @@ export interface CharacterSnapshot {
   readonly mp?: number;
   readonly inventory?: InventoryData;
   readonly selectedSlot?: number;
+  readonly gold?: number;
 }
+
+/** Most gold one character can hold. */
+export const MAX_GOLD = 99_999_999;
 
 function finite(n: unknown, fallback: number): number {
   const v = Number(n);
@@ -74,6 +78,10 @@ export class Character implements Combatant {
   readonly combat = new ActorCombat();
 
   name: string;
+  /** Stable identity for trading, parties and guilds ('player' or an adventurer key). */
+  key = '';
+  /** Wallet. Only economy code (shops, market, trades, loot) changes it. */
+  gold = 0;
   jobId = 'novice';
   progress: CharacterProgress = createStartingProgress();
   skills: Record<string, number> = {};
@@ -257,6 +265,7 @@ export class Character implements Combatant {
       mp: Math.round(this.mp),
       inventory: this.inventory.toJSON(),
       selectedSlot: this.selectedSlot,
+      gold: this.gold,
     };
   }
 
@@ -291,6 +300,7 @@ export class Character implements Combatant {
       return typeof id === 'string' && (this.skills[id] ?? 0) > 0 ? id : null;
     });
     this.equipment.load(p.equipment);
+    this.gold = Math.max(0, Math.min(MAX_GOLD, Math.floor(finite(p.gold, 0))));
     if (legacy) {
       for (const s of STARTING_ITEMS) {
         if (this.inventory.count(s.item) === 0) this.inventory.add(s.item, s.count);

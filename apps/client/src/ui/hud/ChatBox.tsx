@@ -117,6 +117,14 @@ export function ChatBox() {
       case 'heal':
         bridge.devHeal();
         break;
+      case 'gold': {
+        const n = Math.floor(Number(args[0] ?? 1000));
+        if (Number.isFinite(n) && n > 0) {
+          bridge.devGold(n);
+          pushChat(stores, 'system', t('chat.goldGiven', { n }));
+        }
+        break;
+      }
       case 'peace':
       case 'monsters': {
         const on = (cmd ?? '').toLowerCase() === 'monsters';
@@ -141,13 +149,19 @@ export function ChatBox() {
       <div className="pw-chat__log pw-panel" ref={logRef}>
         {messages.slice(open ? -40 : -7).map((m) => (
           <div key={m.id} className={`pw-chat__line pw-chat__line--${m.channel}`}>
-            {m.channel === 'local' && m.author ? (
-              <span className="pw-chat__author">{m.author}</span>
-            ) : null}
             {m.channel !== 'local' ? (
               <span className="pw-chat__tag">
-                [{m.channel === 'notice' ? '★' : t('chat.system')}]
+                [
+                {m.channel === 'notice'
+                  ? '★'
+                  : m.channel === 'system'
+                    ? t('chat.system')
+                    : t(`chat.tag.${m.channel}`)}
+                ]
               </span>
+            ) : null}
+            {(m.channel === 'local' || m.channel === 'nearby') && m.author ? (
+              <span className="pw-chat__author">{m.author}</span>
             ) : null}
             <span className="pw-chat__text">{m.text}</span>
           </div>

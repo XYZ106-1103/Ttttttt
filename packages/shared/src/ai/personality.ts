@@ -18,11 +18,20 @@ export const TRAITS = [
 export type Trait = (typeof TRAITS)[number];
 export type Personality = Readonly<Record<Trait, number>>;
 
-/** Life style that shapes goals: hunters level and fight, artisans gather and craft, explorers roam. */
-export type Archetype = 'hunter' | 'artisan' | 'explorer';
-export const ARCHETYPES: readonly Archetype[] = ['hunter', 'artisan', 'explorer'];
+/**
+ * Life style that shapes goals: hunters level and fight, artisans gather and craft, explorers
+ * roam, merchants keep a stall in town and live off trade (a few of the greediest, most sociable
+ * adventurers become merchants; see AdventurerDirector).
+ */
+export type Archetype = 'hunter' | 'artisan' | 'explorer' | 'merchant';
+export const ARCHETYPES: readonly Archetype[] = ['hunter', 'artisan', 'explorer', 'merchant'];
 
-/** Speech tone derived from personality (picks bark wording). */
+/** Suitability for the merchant life (greed and sociability). */
+export function merchantScore(p: Personality): number {
+  return p.greed * 0.55 + p.sociability * 0.3 + (1 - p.aggression) * 0.15;
+}
+
+/** Speech tone derived from personality (picks bark and dialogue wording). */
 export type Tone = 'warm' | 'proud' | 'shy' | 'gruff' | 'calm';
 
 const bell = (rng: Rng): number => (rng.next() + rng.next() + rng.next()) / 3;
@@ -81,6 +90,13 @@ export function preferredJob(p: Personality, rng: Rng): string {
     if (v > best[1]) best = [s[0], v];
   }
   return best[0];
+}
+
+/** Speech register: polite (존댓말) or casual (반말). */
+export type Register = 'polite' | 'casual';
+
+export function registerOf(tone: Tone): Register {
+  return tone === 'proud' || tone === 'gruff' ? 'casual' : 'polite';
 }
 
 export function toneOf(p: Personality): Tone {

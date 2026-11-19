@@ -15,6 +15,15 @@ import {
   type CraftResult,
   DEFAULT_MOVEMENT,
   DEFAULT_OVERWORLD,
+  Economy,
+  GOLD_DROP,
+  MARKET_X,
+  MERCHANT_STALLS,
+  type NewsItem,
+  type SaleRecord,
+  Society,
+  type SocialEvent,
+  type SpokenLine,
   deriveSeed,
   type Drop,
   type DropEntity,
@@ -54,9 +63,10 @@ import {
   World,
   WorldClock,
 } from '@world/shared';
-import type { PlayerSave, SaveBundle, WorldMeta } from '../persistence/SaveStore';
+import type { PlayerSave, SaveBundle, WorldMeta, WorldSocietySave } from '../persistence/SaveStore';
 import { SAVE_VERSION } from '../persistence/SaveStore';
 import { Player, SKILL_BAR_SIZE } from './Player';
+import { TownServices } from './TownServices';
 
 export { SKILL_BAR_SIZE, Player, IDLE_ACTION };
 export type { ActionIntent, DropEntity, UseIntent };
@@ -95,6 +105,16 @@ export interface SimEvents {
   aiUses: { id: number; out: UseOutcome }[];
   aiLevelUps: { id: number; level: number }[];
   ai: BrainEvent[];
+  /** Conversation lines spoken by active adventurers. */
+  spoken: SpokenLine[];
+  /** World news since last read. */
+  news: NewsItem[];
+  /** Adventurers asking the player to team up. */
+  invites: { from: string; purpose: string }[];
+  /** The player's market listings that sold. */
+  sales: SaleRecord[];
+  /** Social outcomes involving the player (party/guild changes, trades). */
+  social: SocialEvent[];
 }
 
 export interface SimulationOptions {
@@ -108,9 +128,12 @@ export interface SimulationOptions {
   monsters?: boolean;
   /** Number of AI adventurers (default 30, 0 disables them). */
   adventurers?: number;
-  /** Simulate a few minutes of adventurer life before a new world starts (default true). */
+  /** Simulate some adventurer life before a new world starts (default true). */
   warmUp?: boolean;
 }
+
+/** Minutes of adventurer life simulated before a brand-new world opens. */
+export const WARM_UP_MINUTES = 30;
 
 export const RESPAWN_DELAY = 5;
 /** Fraction of the current level's requirement lost on death. */
@@ -133,6 +156,10 @@ export class GameSimulation {
   readonly monsters: MonsterManager;
   readonly adventurers: AdventurerDirector;
   readonly dropSystem: DropSystem;
+  readonly economy: Economy;
+  readonly society: Society;
+  /** Player-facing services: NPCs, shop, exchange, talking, parties and guilds. */
+  readonly town: TownServices;
   readonly explored = new Set<number>();
   readonly events: SimEvents = {
     uses: [],
@@ -148,6 +175,11 @@ export class GameSimulation {
     aiUses: [],
     aiLevelUps: [],
     ai: [],
+    spoken: [],
+    news: [],
+    invites: [],
+    sales: [],
+    social: [],
   };
   /** Simulation time in seconds. */
   time = 0;
@@ -157,6 +189,8 @@ export class GameSimulation {
   private readonly ctx: InteractionContext;
   private readonly lootRng: Rng;
   private readonly charEnv: { -readonly [K in keyof CharacterEnv]: CharacterEnv[K] };
+  private lastNewsId: number;
+  private salesCheckAt = 0;
 
   constructor(options: SimulationOptions) {
     this.worldId = options.worldId;
@@ -200,24 +234,40 @@ export class GameSimulation {
     this.player.motor.grounded = true;
     this.combat.add(this.player);
     const sx = this.world.generator.spawnTileX;
+    this.economy = new Economy({ hourSeconds: this.clock.dayLengthSeconds / 24 });
+    this.society = new Society();
     this.adventurers = new AdventurerDirector(this.world, this.combat, this.movement, {
       count: options.adventurers ?? 30,
       seed: options.seed,
       homeCenter: sx,
       safeFrom: sx - SAFE_RADIUS,
       safeTo: sx + SAFE_RADIUS,
+      society: this.society,
+      economy: this.economy,
+      marketX: sx + MARKET_X,
+      stallXs: MERCHANT_STALLS.map((x) => sx + x),
     });
+    this.town = new TownServices(this);
     if (save?.player) this.applyPlayerSave(save.player);
     else this.player.giveStartingItems();
     this.adventurers.load(save?.adventurers);
+    if (save?.society) {
+      this.economy.load(save.society.economy);
+      this.society.load(
+        save.society.society,
+        (k) => k === 'player' || this.adventurers.byKey(k) !== undefined,
+      );
+    }
     if (save?.meta && save.adventurers) {
       // The world kept living while the game was closed.
       const away = (Date.now() - save.meta.savedAt) / 1000;
       if (away > 30) this.adventurers.catchUp(away, 0);
     } else if (options.warmUp ?? true) {
-      // A new world: adventurers have already been out for a while when the player arrives.
-      this.adventurers.catchUp(8 * 60, 0);
+      // A new world: adventurers have already been living for a while when the player arrives.
+      this.adventurers.catchUp(WARM_UP_MINUTES * 60, 0);
     }
+    // News from before the player arrived is history, not notifications.
+    this.lastNewsId = this.society.news.lastId;
   }
 
   get drops(): readonly DropEntity[] {
@@ -298,15 +348,51 @@ export class GameSimulation {
     this.processCombatEvents();
     regenCharacter(p, now, dt);
     this.adventurers.regenActive(now, dt);
-    for (const pk of this.dropSystem.step(dt, now, this.world, [p, ...active])) {
+    const allied = this.adventurers.allied;
+    for (const pk of this.dropSystem.step(dt, now, this.world, [p, ...active], allied)) {
       if (pk.characterId === p.id) this.events.pickups.push({ itemId: pk.itemId, count: pk.count });
     }
+    if (this.dropSystem.expiredGold > 0) {
+      this.economy.ledger.destroy('expired_drop', this.dropSystem.expiredGold);
+      this.dropSystem.expiredGold = 0;
+    }
+    this.economy.tick(dt, now);
+    this.drainSocial(now);
     for (const e of this.adventurers.events) this.events.ai.push(e);
     this.adventurers.events.length = 0;
     this.clock.advance(dt);
     this.time += dt;
     this.playTime += dt;
     this.tickCount++;
+  }
+
+  /** Collect social happenings for the presentation layer. */
+  private drainSocial(now: number): void {
+    const d = this.adventurers;
+    for (const l of d.spoken) this.events.spoken.push(l);
+    d.spoken.length = 0;
+    for (const e of d.socialEvents) {
+      if (e.type === 'invitePlayer') {
+        this.town.invites.add(e.from);
+        this.events.invites.push({ from: e.from, purpose: e.purpose });
+      } else this.events.social.push(e);
+    }
+    d.socialEvents.length = 0;
+    d.tradeEvents.length = 0;
+    d.drainSocietyChanges(now);
+    if (this.society.news.lastId !== this.lastNewsId) {
+      for (const n of this.society.news.since(this.lastNewsId)) this.events.news.push(n);
+      this.lastNewsId = this.society.news.lastId;
+    }
+    // Player's market sales (proceeds wait in the mailbox at the exchange).
+    if (now >= this.salesCheckAt) {
+      this.salesCheckAt = now + 1;
+      const box = this.economy.market.peekMail('player');
+      if (box && box.sales.length > this.town.seenSales) {
+        for (const sale of box.sales.slice(this.town.seenSales)) this.events.sales.push(sale);
+        this.town.seenSales = box.sales.length;
+      }
+    }
   }
 
   private handlePlayerOut(out: CharacterStepOut): void {
@@ -391,13 +477,47 @@ export class GameSimulation {
   }
 
   private onMonsterDeath(m: Monster): void {
-    const p = this.player;
     const x = m.motor.x;
     const y = m.motor.y - m.motor.height / 2;
+    const d = this.adventurers;
     const credit = this.creditFor(m);
-    if (credit === p.id) {
-      const amount = expForKill(m.def.exp, p.level, m.def.level);
-      this.events.exp.push({ amount, x, y: m.motor.y - m.motor.height });
+    const creditKey = credit !== null ? d.keyOfCharacter(credit) : null;
+    if (m.def.boss) {
+      // Everyone who really fought a boss gets full credit and remembers the fight.
+      const fighters = [...m.damageBy.entries()]
+        .filter(([, dmg]) => dmg >= m.stats.maxHp * 0.03)
+        .map(([id]) => d.keyOfCharacter(id))
+        .filter((k): k is string => k !== null);
+      for (const k of fighters) this.creditKill(k, m, 1);
+      if (fighters.length > 0) d.onRaidVictory(fighters, m.def.id, this.time);
+    } else if (creditKey) {
+      // Party mates nearby share the experience (with a party bonus).
+      const share = d.partyShare(creditKey, x);
+      const mul = AdventurerDirector.shareMul(share.length);
+      for (const k of share) this.creditKill(k, m, mul);
+    }
+    if (credit !== null) {
+      const loot = rollLoot(m.def.drops, this.lootRng);
+      const gold = this.lootRng.int(m.def.gold[0], m.def.gold[1]);
+      this.economy.ledger.create('loot', gold);
+      this.dropSystem.spawn(
+        [
+          ...loot.map((l) => ({ itemId: l.itemId, count: l.count, x, y })),
+          { itemId: GOLD_DROP, count: gold, x, y },
+        ],
+        this.time,
+        credit,
+      );
+    }
+    if (m.def.boss) this.events.notices.push({ kind: 'bossDefeated', monsterId: m.def.id });
+  }
+
+  /** Experience for a kill to the player or an adventurer (by key). */
+  private creditKill(key: string, m: Monster, mul: number): void {
+    const p = this.player;
+    if (key === 'player') {
+      const amount = Math.max(1, Math.round(expForKill(m.def.exp, p.level, m.def.level) * mul));
+      this.events.exp.push({ amount, x: m.motor.x, y: m.motor.y - m.motor.height });
       const gained = p.gainExp(amount);
       if (gained > 0) {
         p.refreshStats(this.time);
@@ -405,20 +525,11 @@ export class GameSimulation {
         p.mp = p.stats.maxMp;
         this.events.levelUps.push(p.level);
       }
-    } else if (credit !== null) {
-      const a = this.adventurers.byCharacter(credit);
-      if (a && this.adventurers.onKill(a, m.def, this.time) > 0)
-        this.events.aiLevelUps.push({ id: credit, level: a.character.level });
+      return;
     }
-    if (credit !== null) {
-      const loot = rollLoot(m.def.drops, this.lootRng);
-      this.dropSystem.spawn(
-        loot.map((l) => ({ itemId: l.itemId, count: l.count, x, y })),
-        this.time,
-        credit,
-      );
-    }
-    if (m.def.boss) this.events.notices.push({ kind: 'bossDefeated', monsterId: m.def.id });
+    const a = this.adventurers.byKey(key);
+    if (a && this.adventurers.onKill(a, m.def, this.time, mul) > 0)
+      this.events.aiLevelUps.push({ id: a.character.id, level: a.character.level });
   }
 
   private onPlayerDeath(): void {
@@ -495,8 +606,9 @@ export class GameSimulation {
         this.events.notices.push({ kind: 'consumeFail', reason: 'no_room' });
         return false;
       }
-      this.monsters.spawn(c.summon, at.x, at.y);
+      const boss = this.monsters.spawn(c.summon, at.x, at.y);
       p.inventory.removeAt(index, 1);
+      this.adventurers.onBossSpawned(boss, this.time);
       this.events.notices.push({ kind: 'bossSpawned', monsterId: c.summon });
       this.events.notices.push({ kind: 'consumed', itemId: st.itemId });
       return true;
@@ -639,10 +751,18 @@ export class GameSimulation {
     p.mp = p.stats.maxMp;
   }
 
+  /** Developer gold (accounted as a faucet so the money supply stays verifiable). */
+  devGold(amount: number): void {
+    const n = Math.max(0, Math.min(1_000_000, Math.floor(amount)));
+    this.player.gold = Math.min(99_999_999, this.player.gold + n);
+    this.economy.ledger.create('loot', n);
+  }
+
   devSpawn(monsterId: string): boolean {
     const at = this.findSpawnSpot(monsterId, [7, 5, 9, 3]);
     if (!at) return false;
-    this.monsters.spawn(monsterId, at.x, at.y);
+    // The summoner holds the claim, so bystanders leave it alone.
+    claimMonster(this.monsters.spawn(monsterId, at.x, at.y), this.player.id, this.time);
     return true;
   }
 
@@ -719,6 +839,10 @@ export class GameSimulation {
 
   exportAdventurers(): ReturnType<AdventurerDirector['toJSON']> {
     return this.adventurers.toJSON();
+  }
+
+  exportSociety(): WorldSocietySave {
+    return { economy: this.economy.toJSON(), society: this.society.toJSON() };
   }
 }
 

@@ -46,6 +46,8 @@ export interface MonsterDef {
   readonly immune?: readonly string[];
   readonly light?: readonly [number, number, number];
   readonly drops: readonly LootEntry[];
+  /** Gold coins dropped on death: [min, max]. */
+  readonly gold: readonly [number, number];
   readonly spawn: SpawnRule | null;
   readonly params?: Readonly<Record<string, number>>;
 }
@@ -68,6 +70,7 @@ export const MONSTER_DEFS: readonly MonsterDef[] = [
     contact: 1,
     knockbackResist: 0,
     aggroRange: 9,
+    gold: [1, 3],
     drops: [
       { item: 'slime_gel', chance: 0.7, min: 1, max: 2 },
       { item: 'healing_potion', chance: 0.04, min: 1, max: 1 },
@@ -90,6 +93,7 @@ export const MONSTER_DEFS: readonly MonsterDef[] = [
     contact: 1,
     knockbackResist: 0.2,
     aggroRange: 10,
+    gold: [2, 5],
     drops: [{ item: 'beetle_shell', chance: 0.6, min: 1, max: 2 }],
     spawn: { zones: ['surface'], time: 'any', weight: 6 },
     params: {
@@ -116,6 +120,7 @@ export const MONSTER_DEFS: readonly MonsterDef[] = [
     contact: 1,
     knockbackResist: 0.1,
     aggroRange: 10,
+    gold: [3, 7],
     drops: [
       { item: 'slime_gel', chance: 0.8, min: 1, max: 3 },
       { item: 'healing_potion', chance: 0.05, min: 1, max: 1 },
@@ -140,6 +145,7 @@ export const MONSTER_DEFS: readonly MonsterDef[] = [
     knockbackResist: 0.1,
     aggroRange: 12,
     flying: true,
+    gold: [4, 8],
     drops: [{ item: 'bat_wing', chance: 0.55, min: 1, max: 2 }],
     spawn: { zones: ['underground', 'deep'], time: 'any', weight: 7 },
     params: { orbit: 54, swoopSpeed: 300, swoopEvery: 2.2, swoopTime: 0.55 },
@@ -162,6 +168,7 @@ export const MONSTER_DEFS: readonly MonsterDef[] = [
     flying: true,
     ghost: true,
     light: [0.35, 0.62, 1.35],
+    gold: [7, 14],
     drops: [
       { item: 'wisp_ember', chance: 0.6, min: 1, max: 2 },
       { item: 'mana_potion', chance: 0.06, min: 1, max: 1 },
@@ -187,6 +194,7 @@ export const MONSTER_DEFS: readonly MonsterDef[] = [
     boss: true,
     immune: ['stun', 'freeze'],
     light: [1.2, 0.62, 0.3],
+    gold: [200, 300],
     drops: [
       { item: 'corestone', chance: 1, min: 3, max: 5 },
       { item: 'iron_ore', chance: 1, min: 8, max: 14 },

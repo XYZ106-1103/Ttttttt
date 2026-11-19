@@ -10,7 +10,8 @@ interface MenuEntry {
   readonly icon: string;
   readonly window?: WindowId;
   readonly lockedPhase?: string;
-  readonly action: 'character' | 'inventory' | 'skills' | 'quests' | 'worldMap' | 'roster' | 'menu';
+  readonly action:
+    'character' | 'inventory' | 'skills' | 'quests' | 'worldMap' | 'roster' | 'guild' | 'menu';
 }
 
 const ENTRIES: readonly MenuEntry[] = [
@@ -29,7 +30,7 @@ const ENTRIES: readonly MenuEntry[] = [
     action: 'inventory',
   },
   { id: 'skills', labelKey: 'hud.skills', icon: '✦', window: 'skills', action: 'skills' },
-  { id: 'quests', labelKey: 'hud.quests', icon: '❖', lockedPhase: 'PHASE 5', action: 'quests' },
+  { id: 'quests', labelKey: 'hud.quests', icon: '❖', lockedPhase: 'PHASE 6+', action: 'quests' },
   {
     id: 'worldMap',
     labelKey: 'hud.worldMap',
@@ -38,6 +39,7 @@ const ENTRIES: readonly MenuEntry[] = [
     action: 'worldMap',
   },
   { id: 'roster', labelKey: 'hud.roster', icon: '☺', window: 'roster', action: 'roster' },
+  { id: 'guild', labelKey: 'window.guild', icon: '⚑', window: 'guild', action: 'guild' },
   { id: 'menu', labelKey: 'hud.menu', icon: '≡', action: 'menu' },
 ];
 
