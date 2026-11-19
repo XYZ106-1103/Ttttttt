@@ -14,6 +14,8 @@ export interface ServerConfig {
   readonly adminEmails: ReadonlySet<string>;
   /** Allowed WebSocket origins; empty = same host only. */
   readonly allowedOrigins: ReadonlySet<string>;
+  /** Account requests (register/login) allowed per minute from one address. */
+  readonly authPerMinute: number;
 }
 
 function list(v: string | undefined): Set<string> {
@@ -41,5 +43,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     staticDir: env.STATIC_DIR ?? '',
     adminEmails: list(env.ADMIN_EMAILS),
     allowedOrigins: list(env.ALLOWED_ORIGINS),
+    authPerMinute: Math.max(1, int(env.AUTH_RATE_PER_MINUTE, 10)),
   };
 }

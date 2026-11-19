@@ -50,6 +50,7 @@ export async function startServer(
     staticDir: '',
     adminEmails: new Set(),
     allowedOrigins: new Set(),
+    authPerMinute: 10,
   };
   const { server, wss } = createApp({ config, repo, auth, world, log });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));

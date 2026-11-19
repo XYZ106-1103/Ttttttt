@@ -279,20 +279,59 @@ React 19 + 순수 CSS 디자인 시스템(토큰: `ui/styles/index.css`). Galmur
 
 > 메뉴를 열어도 월드는 멈추지 않습니다 — 영속 온라인 월드를 전제로 한 설계입니다(입력만 차단).
 
-## 12. 향후 구조 (계획 — 아직 구현되지 않음)
+## 12. 온라인 구조 (PHASE 6)
 
 ```
-apps/server (PHASE 6)     Node.js + TypeScript + WebSocket 게이트웨이, 존(zone) 시뮬레이션 프로세스
-  ├── sim                 packages/shared 시뮬레이션의 권한 있는 실행, 입력 검증
-  ├── persistence         PostgreSQL (계정·캐릭터·수정된 청크·경제), Redis (세션·프레즌스·큐)
-  └── economy             거래소·상점 — 모든 거래 서버 검증, 아이템 복제 방지
-packages/shared/src/ai, economy, society   (PHASE 4–5 구현됨) PHASE 6에서 서버가 권한 있게 실행
-packages/llm (선택)        LLM 대화 어댑터 — 별도 모듈, 게임 상태 직접 수정 불가, 사용자 승인 전 연결 금지
+apps/server/src
+├── main.ts                 환경 변수 설정 → 저장소(PostgreSQL 또는 메모리) → 월드 → HTTP/WebSocket, 정상 종료
+├── config.ts               PORT, DATABASE_URL, WORLD_ID/SEED, ADVENTURERS, ADMIN_EMAILS, ALLOWED_ORIGINS, AUTH_RATE_PER_MINUTE …
+├── auth.ts                 argon2id 비밀번호, 세션 토큰(SHA-256만 저장, 7일), 로그인 실패 잠금, 이름 규칙
+├── db/                     Repository 인터페이스 · PostgresRepository(마이그레이션·어드바이저리 락·upsert) · MemoryRepository
+├── http/app.ts             계정 API(/api/register·login·logout·characters·health), 정적 파일, /ws 업그레이드(Origin 검사)
+└── game/
+    ├── WorldServer.ts      60Hz 권한 루프, 입력 적용, 복제(20Hz, 플레이어별 분산), 청크 동기화, 저장, 채팅
+    ├── Session.ts          연결 1개: 입력 큐, 속도 제한(토큰 버킷), 위반 누적(strike) → 차단
+    ├── replication.ts      관심 영역(72×46타일) 필터, 스냅샷 구성, 이벤트 필터
+    ├── commands.ts         모든 명령의 인자 검증 → 공유 규칙(WorldSim/TownServices) 실행, 경제 저널
+    └── trades.ts           플레이어 ↔ 플레이어 거래(양측 확정, 변경 시 확정 해제, 원자적 교환)
+```
+
+**권한 모델.** 서버가 오프라인과 같은 `WorldSim`(packages/shared)을 실행합니다. 클라이언트는 입력 프레임과
+명령만 보내고, 서버는 프레임을 틱마다 하나씩 순서대로 적용합니다(몰아서 보내도 빨라지지 않음). 명령은 형식 검증 후
+공유 규칙이 범위·소유·골드·공간을 다시 검증합니다. 개발자 명령은 관리자 계정만 가능합니다.
+
+**프로토콜** (`packages/shared/src/net`). 입력 묶음과 스냅샷은 바이너리(메시지별 문자열 테이블), 나머지는 JSON.
+모든 수신 메시지는 엄격히 검증되며(잘린 데이터·NaN·잘못된 UTF-8·범위 밖 값은 거부) 위반이 누적되면 연결을 끊습니다.
+
+**클라이언트 복제본** (`apps/client/src/game/sim/OnlineSimulation.ts`). 렌더러·UI가 쓰는 `ClientSim` 인터페이스를
+오프라인(`GameSimulation`)과 같이 구현합니다.
+
+- 지형: 시드로 생성 + 서버의 수정 청크·타일·오브젝트 변경 적용.
+- 다른 플레이어·모험가·몬스터·드롭·투사체: 스냅샷을 100ms 과거 시점으로 보간해 표시.
+- 내 캐릭터: 입력 즉시 이동 예측 → 서버 상태가 오면 확인되지 않은 입력을 재생해 보정(보정량은 부드럽게 흡수).
+  서버는 늦은 프레임에 대해 입력을 추측하지 않고 짧게 정지(stall)하므로 예측과 서버가 같은 프레임 열을 적용합니다.
+- 인벤토리·스킬·스탯 명령: 같은 공유 규칙으로 즉시 예측하고, 서버의 개인 상태가 오면 덮어씁니다.
+- 마을 서비스(상점·거래소·대화·직거래·길드): `TownApi`(비동기) — 결과는 서버가 결정합니다.
+- 공유 상태 보기: 파티·길드·소식·내 보관함은 변경 시 서버가 전송, 거래소·상점·모험가 명부/카드는 창이 열린 동안 조회.
+
+**저장.** 접속 중 10초마다 캐릭터·변경 청크, 30초마다(거래 후 2초 내) 월드(경제·사회·모험가), 접속 종료 시 캐릭터,
+서버 종료 시 전체. 같은 캐릭터의 재접속·중복 로그인은 직전 저장이 끝난 뒤에만 불러와 롤백·복제가 생기지 않습니다.
+경제 거래는 저널 테이블에 기록됩니다.
+
+**성능 (부하 테스트, 4코어 개발 머신, 봇과 서버 동일 머신).** 100명이 한곳에 모인 최악의 경우 틱 평균 7.2ms ·
+p99 16.2ms(예산 16.7ms), 클라이언트당 하향 약 178KB/s. 50명: 평균 3.6ms. 스냅샷 생성 비용의 대부분은 문자열
+인코딩이었고 캐시로 해결했습니다(`pnpm --filter @world/server loadtest -- --bots N`).
+
+**배포.** `Dockerfile`(클라이언트·서버 빌드 → 정적 파일까지 서버 하나가 제공), `docker-compose.yml`(서버 +
+PostgreSQL 16), GitHub Actions CI(검사·단위/서버/PostgreSQL 테스트·E2E·이미지 빌드). 유료 배포는 하지 않았습니다.
+
+```
+packages/llm (선택, 미구현)  LLM 대화 어댑터 — 별도 모듈, 게임 상태 직접 수정 불가, 사용자 승인 전 연결 금지
 ```
 
 ### AI 기능 도입 정책
 
 외부 LLM/AI API는 **사용자 승인 없이 연결하지 않습니다**. 필요 시 목적·모델·예상 비용·대체 가능성·성능 영향을
 먼저 보고합니다. AI 모험가의 이동·전투·채집·제작·성장·거래는 외부 API 없이 자체 게임 로직으로 구현합니다.
-현재(PHASE 5)까지 어떤 외부 AI 서비스·LLM도 연결되어 있지 않습니다. 모험가 간 대화도 자체 규칙과 문장
+현재(PHASE 6)까지 어떤 외부 AI 서비스·LLM도 연결되어 있지 않습니다. 모험가 간 대화도 자체 규칙과 문장
 템플릿으로 만들어집니다.

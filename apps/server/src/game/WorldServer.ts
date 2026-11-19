@@ -23,13 +23,14 @@ import {
   TILE_SIZE,
   type TileChange,
   type ObjectChange,
+  type WorldEvents,
   WorldSim,
 } from '@world/shared';
 import type { Auth } from '../auth';
 import type { JournalEntry, Repository } from '../db/types';
 import type { Logger } from '../log';
 import { CommandError, COMMANDS, type CommandContext, type SocialOps } from './commands';
-import { buildSnapshot, filterEvents, inView, positionsOf } from './replication';
+import { buildSnapshot, collectEntities, filterEvents, inView, positionsOf } from './replication';
 import { Session, type Transport } from './Session';
 import { PlayerTrades } from './trades';
 
@@ -94,15 +95,31 @@ export class WorldServer {
   private timer: ReturnType<typeof setInterval> | null = null;
   private lastTime = 0;
   private acc = 0;
-  private replications = 0;
   private autosaveAt = 0;
   private worldSaveAt = 0;
   private journalBuf: JournalEntry[] = [];
   private worldDirtyAt: number | null = null;
   private pendingTiles: TileChange[] = [];
   private pendingObjects: ObjectChange[] = [];
+  /** World events and terrain changes of the last few ticks (each player gets those since
+   * their previous update). */
+  private readonly recent: {
+    readonly tick: number;
+    readonly combat: unknown[];
+    readonly monster: unknown[];
+    readonly actor: WorldEvents['actor'];
+    readonly uses: WorldEvents['uses'];
+    readonly levelUps: WorldEvents['levelUps'];
+    readonly spoken: unknown[];
+    readonly news: unknown[];
+    readonly tiles: TileChange[];
+    readonly objects: ObjectChange[];
+  }[] = [];
   private unsubscribe: (() => void)[] = [];
   private readonly trades: PlayerTrades;
+  /** Character saves in flight after a player left (key → write). */
+  private readonly pendingSaves = new Map<string, Promise<void>>();
+  private readonly keyLocks = new Map<string, Promise<void>>();
   /** Recent tick durations (ms) for monitoring. */
   readonly tickMs: number[] = [];
 
@@ -164,7 +181,8 @@ export class WorldServer {
     try {
       for (const s of this.sessions) if (s.state === 'playing') this.applyInput(s);
       this.sim.tick(SIM_DT);
-      if (this.sim.tickCount % REPLICATE_EVERY === 0) this.replicate();
+      this.recordTick();
+      this.replicate();
       this.housekeeping();
     } catch (err) {
       this.log.error('tick failed', { err: String(err), stack: (err as Error).stack });
@@ -213,20 +231,68 @@ export class WorldServer {
 
   // --- Replication --------------------------------------------------------------------------
 
+  /** Move this tick's world events and terrain changes into the short replication log. */
+  private recordTick(): void {
+    const w = this.sim.worldEvents;
+    this.recent.push({
+      tick: this.sim.tickCount,
+      combat: w.combat.splice(0),
+      monster: w.monster.splice(0),
+      actor: w.actor.splice(0),
+      uses: w.uses.splice(0),
+      levelUps: w.levelUps.splice(0),
+      spoken: w.spoken.splice(0),
+      news: w.news.splice(0),
+      tiles: this.pendingTiles,
+      objects: this.pendingObjects,
+    });
+    w.ai.length = 0;
+    w.social.length = 0;
+    this.pendingTiles = [];
+    this.pendingObjects = [];
+    while (this.recent.length > REPLICATE_EVERY + 1) this.recent.shift();
+  }
+
+  /**
+   * Send snapshots and events. Each player is served every REPLICATE_EVERY ticks (20 Hz), and
+   * players are spread over those ticks so the work is even rather than one heavy tick.
+   */
   private replicate(): void {
-    this.replications++;
     const sim = this.sim;
+    const tick = sim.tickCount;
+    const due = [...this.sessions].filter(
+      (s) => s.state === 'playing' && s.slot && (s.id + tick) % REPLICATE_EVERY === 0,
+    );
+    if (due.length === 0) return;
     const pos = positionsOf(sim);
+    const entities = collectEntities(sim, this.looks);
     const speaker = (key: string) => {
       const a = sim.adventurers.byKey(key);
       return a?.tier === 'active' ? a.character.motor : undefined;
     };
-    for (const s of this.sessions) {
-      if (s.state !== 'playing' || !s.slot) continue;
+    for (const s of due) {
+      if (!s.slot) continue;
+      const since = s.lastSentTick;
+      s.lastSentTick = tick;
       if (s.transport.buffered > MAX_BUFFERED) continue; // slow client: skip, it catches up later
+      s.replications++;
+      const log = this.recent.filter((e) => e.tick > since);
+      const events = {
+        combat: log.flatMap((e) => e.combat),
+        monster: log.flatMap((e) => e.monster),
+        actor: log.flatMap((e) => e.actor),
+        uses: log.flatMap((e) => e.uses),
+        levelUps: log.flatMap((e) => e.levelUps),
+        spoken: log.flatMap((e) => e.spoken),
+        news: log.flatMap((e) => e.news),
+        ai: [],
+        social: [],
+      } as unknown as WorldEvents;
+      const pendingTiles = log.flatMap((e) => e.tiles);
+      const pendingObjects = log.flatMap((e) => e.objects);
       const me = s.slot.character;
       const view = { x: me.motor.x, y: me.motor.y };
-      s.transport.sendBinary(encodeSnapshot(buildSnapshot(sim, s.slot, s.ack, this.looks)));
+      s.transport.sendBinary(encodeSnapshot(buildSnapshot(sim, s.slot, s.ack, entities)));
       const pe = s.slot.events;
       const barks: unknown[] = [];
       for (const a of sim.adventurers.active) {
@@ -244,18 +310,18 @@ export class WorldServer {
         });
       }
       if (s.barks.size > 200) s.barks.clear();
-      const tiles = this.pendingTiles
+      const tiles = pendingTiles
         .filter((c) => inView(view, c.tx * TILE_SIZE, c.ty * TILE_SIZE))
         .map((c) => [c.tx, c.ty, c.layer === 'fg' ? 0 : 1, c.next]);
-      const objects = this.pendingObjects
+      const objects = pendingObjects
         .filter((c) => inView(view, c.removed.tx * TILE_SIZE, c.removed.ty * TILE_SIZE))
         .map((c) => [c.cx, c.cy, c.removed.id]);
-      for (const c of this.pendingTiles)
+      for (const c of pendingTiles)
         this.touchKnown(s, Math.floor(c.tx / CHUNK_SIZE), Math.floor(c.ty / CHUNK_SIZE));
-      for (const c of this.pendingObjects) this.touchKnown(s, c.cx, c.cy);
+      for (const c of pendingObjects) this.touchKnown(s, c.cx, c.cy);
       s.sendJson({
         t: 'ev',
-        w: filterEvents(sim.worldEvents, view, pos, speaker),
+        w: filterEvents(events, view, pos, speaker),
         p: {
           pickups: pe.pickups,
           exp: pe.exp,
@@ -277,20 +343,8 @@ export class WorldServer {
       pe.failed = null;
       pe.sales.length = 0;
       pe.invites.length = 0;
-      if (this.replications % PRIVATE_EVERY === 0) this.sendPrivate(s);
+      if (s.replications % PRIVATE_EVERY === 0) this.sendPrivate(s);
     }
-    const w = sim.worldEvents;
-    w.combat.length = 0;
-    w.monster.length = 0;
-    w.actor.length = 0;
-    w.uses.length = 0;
-    w.levelUps.length = 0;
-    w.ai.length = 0;
-    w.spoken.length = 0;
-    w.news.length = 0;
-    w.social.length = 0;
-    this.pendingTiles = [];
-    this.pendingObjects = [];
   }
 
   /** The client already got this chunk's changes incrementally: record its new stamp. */
@@ -528,10 +582,21 @@ export class WorldServer {
     s.accountId = account.id;
     s.characterId = record.id;
     s.admin = account.role === 'admin';
-    // One connection per character: the newest wins.
-    const old = this.byKey.get(s.key);
-    if (old) await this.leave(old, 4004, 'logged in elsewhere');
-    const slot = this.sim.addPlayer(s.key, record.name, record.save);
+    // One connection per character: the newest wins. Joins of the same character run one at a
+    // time, and the character is always loaded after the previous session's save has landed,
+    // so a quick reconnect or a second login can never restore an older copy (no rollbacks,
+    // no duplicated items).
+    const loaded = await this.withKeyLock(s.key, async () => {
+      const old = this.byKey.get(s.key);
+      if (old) await this.leave(old, 4004, 'logged in elsewhere');
+      await this.pendingSaves.get(s.key);
+      return this.repo.character(record.id);
+    });
+    if (s.state !== 'auth' || !loaded) {
+      s.transport.close(4001, 'unauthorized');
+      return;
+    }
+    const slot = this.sim.addPlayer(s.key, loaded.name, loaded.save);
     slot.admin = s.admin;
     s.slot = slot;
     s.state = 'playing';
@@ -565,6 +630,22 @@ export class WorldServer {
     this.broadcastSystem('joined', { name: record.name }, s);
   }
 
+  /** Run `fn` with no other join of the same character in progress. */
+  private async withKeyLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.keyLocks.get(key) ?? Promise.resolve();
+    let release = (): void => undefined;
+    const mine = new Promise<void>((r) => (release = r));
+    const chained = prev.then(() => mine);
+    this.keyLocks.set(key, chained);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.keyLocks.get(key) === chained) this.keyLocks.delete(key);
+    }
+  }
+
   private async leave(s: Session, code: number, reason: string): Promise<void> {
     if (s.state === 'closed') return;
     const wasPlaying = s.state === 'playing';
@@ -582,11 +663,14 @@ export class WorldServer {
     const name = s.slot?.character.name ?? '';
     const save = this.sim.removePlayer(s.key);
     if (save) {
-      try {
-        await this.repo.saveCharacter(s.characterId, save);
-      } catch (err) {
-        this.log.error('save on leave failed', { key: s.key, err: String(err) });
-      }
+      const write = this.repo
+        .saveCharacter(s.characterId, save)
+        .catch((err: unknown) =>
+          this.log.error('save on leave failed', { key: s.key, err: String(err) }),
+        );
+      this.pendingSaves.set(s.key, write);
+      await write;
+      if (this.pendingSaves.get(s.key) === write) this.pendingSaves.delete(s.key);
     }
     this.log.info('player left', { key: s.key, reason, online: this.online.length });
     this.broadcastSystem('left', { name });

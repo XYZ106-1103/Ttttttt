@@ -1,0 +1,40 @@
+# Local deployment: game server + PostgreSQL 16.
+#   docker compose up --build
+# Then open http://localhost:8787 and choose "Play Online".
+# Change POSTGRES_PASSWORD (and the matching DATABASE_URL) before exposing this anywhere.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: world
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-world}
+      POSTGRES_DB: world
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U world -d world']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build: .
+    image: project-world:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://world:${POSTGRES_PASSWORD:-world}@db:5432/world
+      PORT: '8787'
+      WORLD_ID: world-1
+      ADVENTURERS: '30'
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    ports:
+      - '8787:8787'
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+volumes:
+  pgdata:

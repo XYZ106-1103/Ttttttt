@@ -110,105 +110,133 @@ export function selfState(c: Character): SelfState {
   };
 }
 
-/** Snapshot of the world as seen by one player. */
-export function buildSnapshot(
-  sim: WorldSim,
-  viewer: PlayerSlot,
-  ack: number,
-  looks: ReadonlyMap<string, number>,
-): Snapshot {
+/** An entity's view with its position (for interest filtering) and owner (players). */
+export interface WorldEntity {
+  readonly view: EntityView;
+  readonly x: number;
+  readonly y: number;
+  /** Player key for player entities (a player is not sent to themself). */
+  readonly key: string | null;
+}
+
+/** Every replicated entity, built once per replication and shared by all viewers. */
+export function collectEntities(sim: WorldSim, looks: ReadonlyMap<string, number>): WorldEntity[] {
   const now = sim.time;
-  const me = viewer.character;
-  const v: View = { x: me.motor.x, y: me.motor.y };
-  const entities: EntityView[] = [];
+  const out: WorldEntity[] = [];
   for (const s of sim.playerSlots) {
-    if (s === viewer) continue;
     const c = s.character;
-    if (!inView(v, c.motor.x, c.motor.y)) continue;
-    entities.push(
-      characterView(ENT_PLAYER, c, now, {
+    out.push({
+      view: characterView(ENT_PLAYER, c, now, {
         name: c.name,
         look: looks.get(s.key) ?? 0,
         action: '',
         aimX: 0,
         aimY: 0,
       }),
-    );
+      x: c.motor.x,
+      y: c.motor.y,
+      key: s.key,
+    });
   }
   for (const a of sim.adventurers.active) {
     const c = a.character;
-    if (!inView(v, c.motor.x, c.motor.y)) continue;
-    entities.push(
-      characterView(ENT_ADVENTURER, c, now, {
+    out.push({
+      view: characterView(ENT_ADVENTURER, c, now, {
         name: '',
         look: 0,
         action: a.action,
         ...adventurerAim(a),
       }),
-    );
+      x: c.motor.x,
+      y: c.motor.y,
+      key: null,
+    });
   }
   for (const m of sim.monsters.monsters) {
-    if (!inView(v, m.motor.x, m.motor.y)) continue;
     let flags = 0;
     if (m.alive) flags |= MF_ALIVE;
     if (m.vulnerable > 1) flags |= MF_VULNERABLE;
     if (m.statuses.stunned(now)) flags |= MF_STUNNED;
-    entities.push({
-      kind: ENT_MONSTER,
-      id: m.id,
-      def: m.def.id,
-      anim: m.anim,
+    out.push({
+      view: {
+        kind: ENT_MONSTER,
+        id: m.id,
+        def: m.def.id,
+        anim: m.anim,
+        x: m.motor.x,
+        y: m.motor.y,
+        vx: m.motor.vx,
+        vy: m.motor.vy,
+        facing: m.facing,
+        flags,
+        hp: m.hp,
+        maxHp: m.stats.maxHp,
+        deadTime: m.deadTime,
+        statuses: m.statuses.all.filter((s) => s.until > now).map((s) => s.def.id),
+      },
       x: m.motor.x,
       y: m.motor.y,
-      vx: m.motor.vx,
-      vy: m.motor.vy,
-      facing: m.facing,
-      flags,
-      hp: m.hp,
-      maxHp: m.stats.maxHp,
-      deadTime: m.deadTime,
-      statuses: m.statuses.all.filter((s) => s.until > now).map((s) => s.def.id),
+      key: null,
     });
   }
-  for (const d of sim.drops) {
-    if (!inView(v, d.x, d.y)) continue;
-    entities.push({
-      kind: ENT_DROP,
-      id: d.id,
-      item: d.itemId,
-      count: d.count,
+  for (const d of sim.drops)
+    out.push({
+      view: {
+        kind: ENT_DROP,
+        id: d.id,
+        item: d.itemId,
+        count: d.count,
+        x: d.x,
+        y: d.y,
+        magnet: d.magnet,
+      },
       x: d.x,
       y: d.y,
-      magnet: d.magnet,
+      key: null,
     });
-  }
   for (const p of sim.combat.projectiles) {
-    if (!p.alive || !inView(v, p.x, p.y)) continue;
-    entities.push({
-      kind: ENT_PROJECTILE,
-      id: p.id,
-      def: p.def.id,
+    if (!p.alive) continue;
+    out.push({
+      view: { kind: ENT_PROJECTILE, id: p.id, def: p.def.id, x: p.x, y: p.y, vx: p.vx, vy: p.vy },
       x: p.x,
       y: p.y,
-      vx: p.vx,
-      vy: p.vy,
+      key: null,
     });
   }
   for (const z of sim.combat.zones) {
-    if (z.until <= now || !inView(v, z.x, z.y)) continue;
-    entities.push({
-      kind: ENT_ZONE,
-      id: z.id,
-      tag: z.visual,
+    if (z.until <= now) continue;
+    out.push({
+      view: {
+        kind: ENT_ZONE,
+        id: z.id,
+        tag: z.visual,
+        x: z.x,
+        y: z.y,
+        radius: z.radius,
+        left: z.until - now,
+      },
       x: z.x,
       y: z.y,
-      radius: z.radius,
-      left: z.until - now,
+      key: null,
     });
   }
+  return out;
+}
+
+/** Snapshot of the world as seen by one player (entities from `collectEntities`). */
+export function buildSnapshot(
+  sim: WorldSim,
+  viewer: PlayerSlot,
+  ack: number,
+  all: readonly WorldEntity[],
+): Snapshot {
+  const me = viewer.character;
+  const v: View = { x: me.motor.x, y: me.motor.y };
+  const entities: EntityView[] = [];
+  for (const e of all) if (e.key !== viewer.key && inView(v, e.x, e.y)) entities.push(e.view);
   return {
     tick: sim.tickCount,
-    time: now,
+    time: sim.time,
     ack,
     hour: sim.clock.timeOfDay,
     day: sim.clock.day,

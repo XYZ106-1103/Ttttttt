@@ -17,6 +17,23 @@ declare const TextDecoder: new (
 ) => { decode(bytes: Uint8Array): string };
 
 const encoder = new TextEncoder();
+
+/**
+ * UTF-8 bytes of recently written strings. Snapshots repeat the same ids, keys and names for
+ * every player twenty times a second; encoding each once saves most of the replication cost.
+ */
+const encoded = new Map<string, Uint8Array>();
+const MAX_CACHED = 4096;
+
+function utf8(s: string): Uint8Array {
+  let b = encoded.get(s);
+  if (!b) {
+    b = encoder.encode(s);
+    if (encoded.size >= MAX_CACHED) encoded.clear();
+    encoded.set(s, b);
+  }
+  return b;
+}
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 export class Writer {
@@ -89,7 +106,7 @@ export class Writer {
   }
   /** UTF-8 string, up to 255 bytes. */
   str(s: string): this {
-    const bytes = encoder.encode(s);
+    const bytes = utf8(s);
     const n = Math.min(255, bytes.length);
     this.u8(n);
     this.ensure(n);

@@ -224,6 +224,41 @@ describe('game connection', () => {
     expect(srv.world.sim.playerOf('pc:' + a.char)?.gold).toBe(0);
   });
 
+  it('a second login with the same character replaces the first (one session each)', async () => {
+    const a = await newPlayer(srv.url, 'a@x.dev', 'Alice');
+    const first = await Bot.join(srv.url, a.token, a.char);
+    const p1 = srv.world.sim.playerOf('pc:' + a.char);
+    p1?.inventory.add('iron_ore', 2);
+    const second = await Bot.join(srv.url, a.token, a.char);
+    await sleep(300);
+    expect(first.closed?.code).toBe(4004);
+    // Still exactly one copy of the character, with what the first session had.
+    expect(srv.world.sim.playerSlots.filter((s) => s.key === 'pc:' + a.char)).toHaveLength(1);
+    expect(srv.world.sim.playerOf('pc:' + a.char)?.inventory.count('iron_ore')).toBe(2);
+    second.close();
+  });
+
+  it('rate-limits chat, commands and account requests', async () => {
+    const a = await newPlayer(srv.url, 'a@x.dev', 'Alice');
+    const alice = await Bot.join(srv.url, a.token, a.char);
+    for (let i = 0; i < 12; i++) alice.send({ t: 'chat', ch: 'all', text: `spam ${i}` });
+    const limited = await alice.waitFor((m) => m.t === 'chat' && m.code === 'chat_rate');
+    expect(limited).toBeTruthy();
+    const delivered = alice.texts.filter((m) => m.t === 'chat' && typeof m.text === 'string');
+    expect(delivered.length).toBeLessThanOrEqual(6);
+    // Commands beyond the burst are refused (not queued).
+    for (let i = 0; i < 60; i++)
+      alice.send({ t: 'cmd', id: 1000 + i, op: 'select', args: { slot: 1 } });
+    await alice.waitFor((m) => m.t === 'res' && m.error === 'rate_limited');
+    alice.close();
+    // Login attempts from one address are throttled.
+    let status = 0;
+    for (let i = 0; i < 12 && status !== 429; i++)
+      status = (await api(srv.url, '/api/login', { email: 'x@x.dev', password: 'whatever1' }))
+        .status;
+    expect(status).toBe(429);
+  });
+
   it('disconnects clients that keep sending garbage', async () => {
     const a = await newPlayer(srv.url, 'a@x.dev', 'Alice');
     const alice = await Bot.join(srv.url, a.token, a.char);

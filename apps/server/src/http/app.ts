@@ -98,7 +98,7 @@ export function createApp(deps: AppDeps): { server: Server; wss: WebSocketServer
   const limitAuth = (ip: string) => {
     let l = authLimits.get(ip);
     if (!l) {
-      l = new RateLimit(10 / 60, 8);
+      l = new RateLimit(config.authPerMinute / 60, Math.min(8, config.authPerMinute));
       authLimits.set(ip, l);
       if (authLimits.size > 10_000) authLimits.clear();
     }

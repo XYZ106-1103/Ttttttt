@@ -55,6 +55,9 @@ export class Session {
   /** Chunk replication bookkeeping: chunk index → change stamp the client has. */
   readonly knownChunks = new Map<number, string>();
   lastPrivate = '';
+  /** Tick of the last snapshot/events sent, and how many were sent. */
+  lastSentTick = 0;
+  replications = 0;
   /** Last society view sent (parties, guilds, news, own mailbox). */
   lastSocial = '';
   readonly messages = new RateLimit(120, 240);
