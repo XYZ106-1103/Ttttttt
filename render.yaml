@@ -1,0 +1,40 @@
+# Render Blueprint: the game server (Docker, serves the client too) + PostgreSQL.
+# Render dashboard → New → Blueprint → pick this repository → Apply.
+#
+# Free plan notes (see README "Render 배포"):
+# - The free instance has 0.1 CPU: ADVENTURERS is 10 so the 60 Hz world keeps up
+#   (30 runs in slow motion on that CPU). Raise it on a bigger instance.
+# - Free web services sleep after 15 minutes without traffic and take about a minute to wake.
+# - Free Render Postgres databases expire 30 days after creation. To keep data longer,
+#   upgrade the database or set DATABASE_URL to another PostgreSQL (direct, non-pooled URL).
+services:
+  - type: web
+    name: project-world
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: project-world-db
+          property: connectionString
+      - key: ADVENTURERS
+        value: '10'
+      - key: TRUST_PROXY
+        value: '1'
+      - key: WORLD_ID
+        value: world-1
+      # Emails whose accounts get developer commands (comma-separated). Set in the dashboard.
+      - key: ADMIN_EMAILS
+        sync: false
+
+databases:
+  - name: project-world-db
+    plan: free
+    region: singapore
+    databaseName: world
+    user: world

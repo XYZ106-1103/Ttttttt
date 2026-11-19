@@ -16,6 +16,11 @@ export interface ServerConfig {
   readonly allowedOrigins: ReadonlySet<string>;
   /** Account requests (register/login) allowed per minute from one address. */
   readonly authPerMinute: number;
+  /**
+   * Behind a reverse proxy (Render, a load balancer): take the client address from
+   * X-Forwarded-For. Only enable when the proxy is the sole way in.
+   */
+  readonly trustProxy: boolean;
 }
 
 function list(v: string | undefined): Set<string> {
@@ -44,5 +49,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     adminEmails: list(env.ADMIN_EMAILS),
     allowedOrigins: list(env.ALLOWED_ORIGINS),
     authPerMinute: Math.max(1, int(env.AUTH_RATE_PER_MINUTE, 10)),
+    trustProxy: env.TRUST_PROXY === '1' || env.TRUST_PROXY === 'true',
   };
 }

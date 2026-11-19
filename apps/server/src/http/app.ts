@@ -80,7 +80,13 @@ function bearer(req: IncomingMessage): string {
   return h.startsWith('Bearer ') ? h.slice(7).trim() : '';
 }
 
-function clientIp(req: IncomingMessage): string {
+/** The client's address: the socket peer, or (behind a trusted proxy) the forwarded client. */
+export function clientIp(req: IncomingMessage, trustProxy = false): string {
+  if (trustProxy) {
+    const fwd = req.headers['x-forwarded-for'];
+    const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(',')[0]?.trim();
+    if (first) return first.slice(0, 64);
+  }
   return req.socket.remoteAddress ?? 'unknown';
 }
 
@@ -122,7 +128,7 @@ export function createApp(deps: AppDeps): { server: Server; wss: WebSocketServer
     if (path === '/api/health' && method === 'GET')
       return send(res, 200, { ok: true, ...world.status() });
     if (path === '/api/register' && method === 'POST') {
-      limitAuth(clientIp(req));
+      limitAuth(clientIp(req, config.trustProxy));
       const b = await readJson(req);
       const r = await auth.register(String(b.email ?? ''), String(b.password ?? ''));
       return r.ok
@@ -130,7 +136,7 @@ export function createApp(deps: AppDeps): { server: Server; wss: WebSocketServer
         : send(res, r.reason === 'exists' ? 409 : 400, { error: r.reason });
     }
     if (path === '/api/login' && method === 'POST') {
-      limitAuth(clientIp(req));
+      limitAuth(clientIp(req, config.trustProxy));
       const b = await readJson(req);
       const r = await auth.login(String(b.email ?? ''), String(b.password ?? ''));
       return r.ok
@@ -237,7 +243,7 @@ export function createApp(deps: AppDeps): { server: Server; wss: WebSocketServer
             return ws.bufferedAmount;
           },
         },
-        clientIp(req),
+        clientIp(req, config.trustProxy),
       );
       ws.on('message', (data, isBinary) => {
         const buf = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
