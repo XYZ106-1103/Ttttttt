@@ -56,6 +56,8 @@ export class World implements TileReader {
   private readonly chunks: (Chunk | undefined)[];
   private readonly objects: (WorldObject[] | undefined)[];
   private readonly objectsModified = new Set<number>();
+  /** Object removals per chunk (replication bookkeeping). */
+  private readonly objectStamps = new Map<number, number>();
   private readonly persisted = new Map<number, SerializedChunk>();
   private readonly dirty = new Set<number>();
   private readonly listeners = new Set<TileChangeListener>();
@@ -255,6 +257,7 @@ export class World implements TileReader {
     const [removed] = list.splice(i, 1);
     const index = this.index(cx, cy);
     this.objectsModified.add(index);
+    this.objectStamps.set(index, (this.objectStamps.get(index) ?? 0) + 1);
     this.dirty.add(index);
     if (removed) for (const l of this.objectListeners) l({ cx, cy, removed });
     return true;
@@ -290,6 +293,56 @@ export class World implements TileReader {
       bg: rleEncode(chunk.bg),
       objects: objModified ? [...(this.objects[index] ?? saved?.objects ?? [])] : null,
     };
+  }
+
+  /**
+   * Current data of a chunk if it differs from what the generator produces (for sending to
+   * clients, which generate unmodified chunks themselves from the seed). Null if unmodified.
+   */
+  chunkData(cx: number, cy: number): SerializedChunk | null {
+    if (!this.inChunkBounds(cx, cy)) return null;
+    const index = this.index(cx, cy);
+    this.getChunk(cx, cy);
+    return this.serialize(index) ?? this.persisted.get(index) ?? null;
+  }
+
+  /** Change counter of a chunk's tiles and objects (for replication bookkeeping). */
+  chunkStamp(cx: number, cy: number): string {
+    const chunk = this.getChunk(cx, cy);
+    const index = this.index(cx, cy);
+    return `${chunk?.version ?? 0}:${this.objectStamps.get(index) ?? 0}`;
+  }
+
+  /**
+   * Apply authoritative chunk data from the server (client replica). Tiles that differ are set
+   * through setTile (so renderers update); objects missing from the data are removed.
+   */
+  applyChunkData(c: SerializedChunk): void {
+    if (!c || c.v !== CHUNK_FORMAT_VERSION || !this.inChunkBounds(c.cx, c.cy)) return;
+    const index = this.index(c.cx, c.cy);
+    if (!this.chunks[index]) {
+      this.persisted.set(index, c);
+      if (this.objects[index] && c.objects) this.objects[index] = undefined;
+      return;
+    }
+    const fg = new Uint16Array(CHUNK_SIZE * CHUNK_SIZE);
+    const bg = new Uint16Array(CHUNK_SIZE * CHUNK_SIZE);
+    if (!rleDecode(c.fg, fg) || !rleDecode(c.bg, bg)) return;
+    const chunk = this.chunks[index];
+    if (!chunk) return;
+    for (let i = 0; i < fg.length; i++) {
+      const tx = c.cx * CHUNK_SIZE + (i % CHUNK_SIZE);
+      const ty = c.cy * CHUNK_SIZE + Math.floor(i / CHUNK_SIZE);
+      if (chunk.fg[i] !== fg[i] && this.tiles.get(fg[i] ?? 0) !== undefined)
+        this.setTile(tx, ty, 'fg', fg[i] ?? 0);
+      if (chunk.bg[i] !== bg[i] && this.tiles.get(bg[i] ?? 0) !== undefined)
+        this.setTile(tx, ty, 'bg', bg[i] ?? 0);
+    }
+    if (c.objects) {
+      const keep = new Set(c.objects.map((o) => o.id));
+      for (const o of [...this.objectsInChunk(c.cx, c.cy)])
+        if (!keep.has(o.id)) this.removeObject(o);
+    }
   }
 
   /** Register previously saved chunks. Call before the chunks are first accessed. */

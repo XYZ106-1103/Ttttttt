@@ -77,3 +77,6 @@ export * from './sim/saveTypes';
 export * from './sim/Player';
 export * from './sim/WorldSim';
 export * from './sim/TownServices';
+export * from './net/codec';
+export * from './net/protocol';
+export * from './net/privateState';
