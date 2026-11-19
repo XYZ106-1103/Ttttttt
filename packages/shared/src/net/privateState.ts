@@ -5,8 +5,12 @@
  */
 import type { Character, CharacterSnapshot } from '../actors/Character';
 import type { ItemStack } from '../sandbox/Inventory';
+import type { HitProgress } from '../sandbox/interaction';
 
-/** Changes rarely: inventory, equipment, stats, skills (sent when it changes). */
+/**
+ * Changes rarely: inventory, equipment, stats, skills (sent when it changes). HP and MP travel
+ * with the vitals instead, so regeneration does not resend the whole inventory.
+ */
 export interface PrivateFull {
   readonly snap: CharacterSnapshot;
   readonly cursor: ItemStack | null;
@@ -32,12 +36,14 @@ export interface Vitals {
   readonly cooldowns: readonly (readonly [string, number])[];
   /** [id, magnitude, until, duration] */
   readonly statuses: readonly (readonly [string, number, number, number])[];
+  /** Mining/chopping progress on the current target (crack overlay). */
+  readonly hit: HitProgress | null;
 }
 
 export function capturePrivate(c: Character): PrivateFull {
   const cur = c.inventory.cursor;
   return {
-    snap: c.exportSnapshot(),
+    snap: { ...c.exportSnapshot(), hp: 0, mp: 0 },
     cursor: cur ? { itemId: cur.itemId, count: cur.count } : null,
   };
 }
@@ -61,6 +67,7 @@ export function captureVitals(c: Character): Vitals {
     staggerUntil: c.staggerUntil,
     cooldowns: [...ac.cooldowns.entries()],
     statuses: c.statuses.all.map((s) => [s.def.id, s.magnitude, s.until, s.duration] as const),
+    hit: c.hit ? { key: c.hit.key, damage: c.hit.damage, lastHit: c.hit.lastHit } : null,
   };
 }
 
@@ -95,6 +102,7 @@ export function applyVitals(c: Character, v: Vitals, now: number): void {
     if (until <= now) continue;
     c.statuses.apply(id, until - duration, duration, { magnitude });
   }
+  c.hit = v.hit ? { key: v.hit.key, damage: v.hit.damage, lastHit: v.hit.lastHit } : null;
   c.refreshStats(now);
   c.hp = v.hp;
   c.mp = v.mp;

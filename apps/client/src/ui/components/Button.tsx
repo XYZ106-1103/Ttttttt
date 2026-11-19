@@ -9,6 +9,7 @@ interface ButtonProps {
   readonly active?: boolean;
   readonly className?: string;
   readonly testId?: string;
+  readonly type?: 'button' | 'submit';
 }
 
 export function Button({
@@ -20,10 +21,11 @@ export function Button({
   active,
   className = '',
   testId,
+  type = 'button',
 }: ButtonProps) {
   return (
     <button
-      type="button"
+      type={type}
       className={`pw-btn pw-btn--${variant} ${active ? 'is-active' : ''} ${className}`}
       onClick={onClick}
       disabled={disabled}

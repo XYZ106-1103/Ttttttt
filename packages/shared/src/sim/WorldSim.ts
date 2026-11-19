@@ -8,7 +8,7 @@ import type { ActorEvent, CastFail } from '../combat/ActorCombat';
 import { type CombatEvent, CombatWorld } from '../combat/CombatWorld';
 import { expForKill } from '../combat/damage';
 import type { LearnFail } from '../combat/progression';
-import { TILE_SIZE } from '../constants';
+import { CHUNK_SIZE, TILE_SIZE } from '../constants';
 import { JOB_STARTER_WEAPONS } from '../data/items';
 import { getMonsterDef } from '../data/monsters';
 import { DEFAULT_MOVEMENT, type MovementConfig } from '../data/movement';
@@ -137,6 +137,11 @@ export class PlayerSlot {
   seenSales = 0;
   /** May use developer commands (offline player, or admins online). */
   admin = false;
+  /**
+   * Skip this player's movement/actions for the next tick only (online: their input frame is
+   * late, and holding still keeps the server applying exactly the client's frames).
+   */
+  stall = false;
   readonly town: TownServices;
 
   constructor(
@@ -295,12 +300,15 @@ export class WorldSim {
 
   // --- Players joining and leaving ----------------------------------------------------------
 
-  /** Bring a player into the world (from their save, or new at the spawn point). */
-  addPlayer(key: string, name: string, save: PlayerSave | null = null): PlayerSlot {
+  /**
+   * Bring a player into the world (from their save, or new at the spawn point). `id` is only
+   * given by an online client mirroring the server's character (ids then match the server's).
+   */
+  addPlayer(key: string, name: string, save: PlayerSave | null = null, id?: number): PlayerSlot {
     const existing = this.slots.get(key);
     if (existing) return existing;
     const spawn = this.world.spawnPoint();
-    const p = new Player(this.combat.newId(), name, spawn.x, spawn.y, this.movement, key);
+    const p = new Player(id ?? this.combat.newId(), name, spawn.x, spawn.y, this.movement, key);
     p.motor.grounded = true;
     const slot = new PlayerSlot(key, p, this);
     this.slots.set(key, slot);
@@ -330,6 +338,19 @@ export class WorldSim {
     return save;
   }
 
+  /** Chunks around each player count as explored (world map fog of war; kept in saves). */
+  private markExplored(): void {
+    const w = this.world;
+    for (const slot of this.slots.values()) {
+      const m = slot.character.motor;
+      const cx = Math.floor(m.x / TILE_SIZE / CHUNK_SIZE);
+      const cy = Math.floor(m.y / TILE_SIZE / CHUNK_SIZE);
+      for (let y = cy - 1; y <= cy + 1; y++)
+        for (let x = cx - 1; x <= cx + 1; x++)
+          if (w.inChunkBounds(x, y)) slot.explored.add(y * w.widthChunks + x);
+    }
+  }
+
   private characters(): Player[] {
     return [...this.slots.values()].map((s) => s.character);
   }
@@ -355,6 +376,12 @@ export class WorldSim {
     for (const slot of this.slots.values()) {
       const p = slot.character;
       p.refreshStats(now);
+      if (slot.stall) {
+        slot.stall = false;
+        p.prevX = p.motor.x;
+        p.prevY = p.motor.y;
+        continue;
+      }
       const out = newStepOut();
       stepCharacter(this.charEnv, p, slot.intent, out);
       // A click is consumed by one tick; held buttons persist in the next intent.
@@ -406,6 +433,7 @@ export class WorldSim {
     this.processCombatEvents();
     for (const p of players) regenCharacter(p, now, dt);
     this.adventurers.regenActive(now, dt);
+    if (this.tickCount % 30 === 0) this.markExplored();
     for (const pk of this.dropSystem.step(
       dt,
       now,

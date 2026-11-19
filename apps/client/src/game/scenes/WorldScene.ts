@@ -12,7 +12,7 @@ import {
   TILE_SIZE,
   type UseOutcome,
 } from '@world/shared';
-import { t } from '../../i18n';
+import { hasMessage, t } from '../../i18n';
 import { pushChat, pushPickup, showToast } from '../../app/stores';
 import { ParallaxBackground } from '../background/ParallaxBackground';
 import { CameraController } from '../camera/CameraController';
@@ -39,6 +39,12 @@ import { ObjectRenderer } from '../render/ObjectRenderer';
 import { TorchRenderer } from '../render/TorchRenderer';
 import type { GameServices } from '../services';
 import { type ActionIntent, GameSimulation, IDLE_ACTION } from '../sim/GameSimulation';
+import type { ClientSim } from '../sim/ClientSim';
+import { OnlineSimulation } from '../sim/OnlineSimulation';
+import { socketUrl } from '../../net/endpoint';
+import { NetClient, type ServerJson, type Welcome } from '../../net/NetClient';
+import { appearanceFromLook, lookTextureId } from '../art/character/appearance';
+import { characterPortraitDataUrl, ensureCharacterTexture } from '../render/textures';
 import { WORLD_ID, WORLD_SEED } from '../worldConfig';
 
 export { WORLD_SEED };
@@ -68,7 +74,13 @@ function hexColor(c: string): number {
  * saving, FX and UI store publishing.
  */
 export class WorldScene extends Phaser.Scene {
-  private sim!: GameSimulation;
+  private sim!: ClientSim;
+  /** Set in online play (the same object as `sim`). */
+  private online: OnlineSimulation | null = null;
+  private onlineShown = false;
+  private seenTeleports = 0;
+  private netTimer = 0;
+  private leaving = false;
   private mode: Mode = 'title';
   private readonly stepper = new FixedStepper(SIM_DT);
   private readonly frameEvents = createFrameEvents();
@@ -92,7 +104,8 @@ export class WorldScene extends Phaser.Scene {
   private interaction!: InteractionController;
   private drops!: DropRenderer;
   private torches!: TorchRenderer;
-  private saves!: SaveManager;
+  /** Local saving (offline play only; the server saves online characters). */
+  private saves: SaveManager | null = null;
   private combatView!: CombatPresenter;
   private social!: SocialPresenter;
   private publishedPlayerVersion = -1;
@@ -125,22 +138,33 @@ export class WorldScene extends Phaser.Scene {
     super('World');
   }
 
-  create(data?: { autoStart?: boolean }): void {
+  create(data?: { autoStart?: boolean; online?: { net: NetClient; welcome: Welcome } }): void {
     const { stores, bridge, assets } = this.services;
     if (!assets.tileset) throw new Error('Tileset was not generated');
     const seed = seedFromString(WORLD_SEED);
     this.mode = 'title';
     this.hadSave = assets.save.player !== null;
+    this.onlineShown = false;
+    this.seenTeleports = 0;
+    this.leaving = false;
 
-    this.sim = new GameSimulation({
-      seed,
-      worldId: WORLD_ID,
-      playerName: t('player.defaultName'),
-      startHour: START_HOUR,
-      save: assets.save,
-    });
-    this.resumeHour = this.sim.clock.timeOfDay;
-    this.sim.clock.setTime(TITLE_HOUR);
+    if (data?.online) {
+      const o = new OnlineSimulation(data.online.net, data.online.welcome);
+      this.online = o;
+      this.sim = o;
+    } else {
+      this.online = null;
+      const offline = new GameSimulation({
+        seed,
+        worldId: WORLD_ID,
+        playerName: t('player.defaultName'),
+        startHour: START_HOUR,
+        save: assets.save,
+      });
+      this.sim = offline;
+      this.resumeHour = offline.clock.timeOfDay;
+      offline.clock.setTime(TITLE_HOUR);
+    }
     const world = this.sim.world;
 
     // --- Layers & cameras -------------------------------------------------------------------
@@ -187,11 +211,18 @@ export class WorldScene extends Phaser.Scene {
       this.overlayLayer,
       assets.tileset,
     );
+    // Online characters wear their chosen look; offline uses the designed player appearance.
+    const appearance = this.online
+      ? appearanceFromLook(this.online.look)
+      : this.services.playerAppearance;
+    const playerTexture = this.online ? lookTextureId(this.online.look) : 'player';
+    ensureCharacterTexture(this, playerTexture, appearance);
+    stores.player.set({ portrait: characterPortraitDataUrl(appearance) });
     this.player = new CharacterView(
       this,
       this.worldLayer,
       this.labelLayer,
-      'player',
+      playerTexture,
       this.sim.player.name,
       world,
     );
@@ -208,7 +239,10 @@ export class WorldScene extends Phaser.Scene {
       stores,
     );
     this.social = new SocialPresenter(this, this.worldLayer, this.labelLayer, this.sim, stores);
-    this.saves = new SaveManager(this.services.saveStore, this.sim, seed);
+    this.saves =
+      this.sim instanceof GameSimulation
+        ? new SaveManager(this.services.saveStore, this.sim, seed)
+        : null;
 
     this.onResize();
     this.scale.on(Phaser.Scale.Events.RESIZE, this.onResize, this);
@@ -220,8 +254,12 @@ export class WorldScene extends Phaser.Scene {
 
     bridge.attach({
       startGame: () => this.startGame(),
-      returnToTitle: () => this.returnToTitle(),
-      setTimeOfDay: (h) => this.sim.clock.setTime(h),
+      returnToTitle: () => (this.online ? this.leaveOnline(null) : this.returnToTitle()),
+      startOnline: (token, id) => this.startOnline(token, id),
+      sendChat: (ch, text, to) => this.online?.net.chat(ch, text, to),
+      isOnline: () => this.online !== null,
+      isAdmin: () => (this.online ? this.online.admin : true),
+      setTimeOfDay: (h) => (this.online ? this.online.devTime(h) : this.sim.clock.setTime(h)),
       teleport: (tx, ty) => {
         const ok = this.sim.placePlayer(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE);
         if (ok) this.cameraCtl.snap(this.playerTarget(), this.viewW, this.viewH, this.bounds());
@@ -235,7 +273,7 @@ export class WorldScene extends Phaser.Scene {
       inventoryClick: (i, b) => this.sim.clickInventory(i, b),
       returnCursor: () => this.sim.returnCursor(),
       craft: (id, times) => this.sim.craft(id, times),
-      resetWorld: (start) => this.resetWorld(start),
+      resetWorld: (start) => (this.online ? Promise.resolve() : this.resetWorld(start)),
       clickEquipment: (slot) => this.sim.clickEquipment(slot),
       allocateStat: (stat, n) => this.sim.allocateStat(stat, n),
       autoAllocate: () => this.sim.autoAllocate(),
@@ -251,11 +289,16 @@ export class WorldScene extends Phaser.Scene {
       devSummon: (id) => this.sim.devSpawn(id),
       devGive: (id, n) => {
         if (!itemRegistry.has(id)) return false;
+        if (this.online) return this.online.devGive(id, n);
         this.sim.player.inventory.add(id, Math.max(1, Math.min(999, Math.floor(n))));
         return true;
       },
       devGold: (n) => this.sim.devGold(n),
       devHeal: () => {
+        if (this.online) {
+          this.online.devHeal();
+          return;
+        }
         const p = this.sim.player;
         if (!p.alive) return;
         p.hp = p.stats.maxHp;
@@ -263,10 +306,11 @@ export class WorldScene extends Phaser.Scene {
       },
       setMonsters: (on) => {
         this.sim.monstersEnabled = on;
-        if (!on) this.sim.monsters.clear();
+        if (!on && !this.online) this.sim.monsters.clear();
       },
       getWorld: () => this.sim.world,
-      getTown: () => (this.mode === 'playing' ? this.sim.town : null),
+      // Online town services go through the server (PHASE 6-5); never the local replica.
+      getTown: () => (this.mode === 'playing' && !this.online ? this.sim.town : null),
       nameOf: (key) => nameOf(this.sim, key),
       lineText: (speaker, line, params) => spokenText(this.sim, speaker, line, params),
       getExplored: () => this.sim.explored,
@@ -280,6 +324,18 @@ export class WorldScene extends Phaser.Scene {
     this.publishPlayer(true);
     this.publishInventory(true);
     stores.world.set({ seed: world.seed });
+    if (this.online) {
+      stores.net.set({
+        mode: 'online',
+        state: 'online',
+        rtt: 0,
+        admin: this.online.admin,
+        peers: 0,
+      });
+      this.enterOnline();
+      return;
+    }
+    stores.net.set({ mode: 'offline', state: 'online', rtt: 0, admin: false, peers: 0 });
     stores.app.set({
       phase: 'title',
       bootProgress: 1,
@@ -290,11 +346,119 @@ export class WorldScene extends Phaser.Scene {
     else this.fadeTo(0, 900);
   }
 
+  // --- Online play ----------------------------------------------------------------------------
+
+  /** Connect to the server, then rebuild the scene around the online world. */
+  private async startOnline(token: string, characterId: number): Promise<string | null> {
+    if (this.online) return 'already_online';
+    let net: NetClient;
+    try {
+      net = await NetClient.connect(socketUrl(), token, characterId);
+    } catch (err) {
+      return err instanceof Error ? err.message : 'network';
+    }
+    const { stores } = this.services;
+    await this.saves?.flush();
+    await this.fadeTo(1, 400);
+    stores.ui.set({ windows: [], menuOpen: false, chatOpen: false, banner: null });
+    stores.chat.set({ messages: [] });
+    stores.app.set({ notice: null });
+    this.scene.restart({ online: { net, welcome: net.welcome } });
+    return null;
+  }
+
+  private enterOnline(): void {
+    const { stores } = this.services;
+    this.mode = 'playing';
+    this.player.setVisible(true);
+    this.stepper.reset();
+    this.lastRegion = '';
+    stores.app.set({ phase: 'playing', bootProgress: 1 });
+    pushChat(stores, 'notice', t('net.welcome', { name: this.sim.player.name }));
+    pushChat(stores, 'system', t('chat.tip'));
+  }
+
+  /** Leave the server and go back to the (offline) title screen. */
+  private async leaveOnline(notice: string | null): Promise<void> {
+    if (!this.online || this.leaving) return;
+    this.leaving = true;
+    const { stores } = this.services;
+    await this.fadeTo(1, 400);
+    this.online.close();
+    stores.ui.set({ windows: [], menuOpen: false, chatOpen: false, banner: null });
+    stores.chat.set({ messages: [] });
+    stores.app.set({ phase: 'title', notice });
+    this.scene.restart({});
+  }
+
+  private updateOnline(dt: number): void {
+    const o = this.online;
+    if (!o) return;
+    const { stores } = this.services;
+    if (o.ready && !this.onlineShown) {
+      this.onlineShown = true;
+      this.seenTeleports = o.teleports;
+      this.cameraCtl.snap(this.playerTarget(), this.viewW, this.viewH, this.bounds());
+      void this.fadeTo(0, 600);
+    }
+    if (o.teleports !== this.seenTeleports) {
+      this.seenTeleports = o.teleports;
+      this.cameraCtl.snap(this.playerTarget(), this.viewW, this.viewH, this.bounds());
+    }
+    for (const m of o.drainInbox()) this.onServerMessage(m);
+    this.netTimer -= dt;
+    if (this.netTimer <= 0) {
+      this.netTimer = 0.5;
+      stores.net.set({ state: o.connection, rtt: Math.round(o.rtt), peers: o.peers().length });
+    }
+  }
+
+  private onServerMessage(m: ServerJson): void {
+    const { stores } = this.services;
+    switch (m.t) {
+      case 'chat': {
+        if (typeof m.code === 'string') {
+          const key = `net.sys.${m.code}`;
+          if (hasMessage(key)) pushChat(stores, 'system', t(key, { name: String(m.name ?? '') }));
+          break;
+        }
+        const text = String(m.text ?? '');
+        const name = String(m.name ?? '');
+        if (m.ch === 'party' || m.ch === 'guild') pushChat(stores, 'party', `${name}: ${text}`);
+        else if (m.ch === 'near') pushChat(stores, 'nearby', text, name);
+        else if (m.ch === 'whisper')
+          pushChat(
+            stores,
+            'local',
+            text,
+            m.from === this.sim.selfKey ? `→ ${String(m.to ?? '')}` : `${name} →`,
+          );
+        else pushChat(stores, 'local', text, name);
+        break;
+      }
+      case 'net':
+        if (m.state === 'reconnecting') pushChat(stores, 'system', t('net.reconnecting'));
+        else if (m.state === 'online') pushChat(stores, 'system', t('net.reconnected'));
+        else if (m.state === 'closed') {
+          const key = `net.closed.${String(m.code ?? '')}`;
+          void this.leaveOnline(t(hasMessage(key) ? key : 'net.closed'));
+        }
+        break;
+      case 'res':
+        if (m.ok === false && m.error === 'forbidden')
+          pushChat(stores, 'system', t('net.forbidden'));
+        break;
+      case 'error':
+        pushChat(stores, 'system', t('net.error', { code: String(m.code ?? '') }));
+        break;
+    }
+  }
+
   private readonly onInspect = (p: Phaser.Input.Pointer): void => {
     if (p.button !== 2 || this.mode !== 'playing') return;
     const wx = this.view.left + p.x / this.zoom;
     const wy = this.view.top + p.y / this.zoom;
-    if (this.social.onRightClick(wx, wy)) return;
+    if (!this.online && this.social.onRightClick(wx, wy)) return;
     const a = this.combatView.adventurers.pick(this.sim.adventurers.active, wx, wy);
     if (!a) return;
     this.services.stores.adventurers.set({ selected: a.key });
@@ -356,7 +520,7 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private async startGame(): Promise<void> {
-    if (this.mode === 'playing') return;
+    if (this.mode === 'playing' || !this.saves) return;
     const { stores } = this.services;
     await this.fadeTo(1, 450);
     this.mode = 'playing';
@@ -374,14 +538,14 @@ export class WorldScene extends Phaser.Scene {
       if (!this.services.saveStore.persistent) pushChat(stores, 'system', t('save.unavailable'));
     }
     this.hadSave = true;
-    await this.saves.flush();
+    await this.saves?.flush();
     await this.fadeTo(0, 650);
   }
 
   private async returnToTitle(): Promise<void> {
     if (this.mode === 'title') return;
     const { stores } = this.services;
-    await this.saves.flush();
+    await this.saves?.flush();
     await this.fadeTo(1, 400);
     this.resumeHour = this.sim.clock.timeOfDay;
     this.mode = 'title';
@@ -396,7 +560,7 @@ export class WorldScene extends Phaser.Scene {
   private async resetWorld(start: boolean): Promise<void> {
     const { stores, saveStore, assets } = this.services;
     await this.fadeTo(1, 400);
-    this.saves.dispose();
+    this.saves?.dispose();
     await saveStore.clear(WORLD_ID);
     assets.save = EMPTY_SAVE;
     stores.ui.set({ windows: [], menuOpen: false, chatOpen: false, banner: null });
@@ -482,6 +646,7 @@ export class WorldScene extends Phaser.Scene {
       );
     }
     const intent = this.interaction.update(this.view, this.zoom, this.sim, playing && canUse);
+    if (this.online) this.updateOnline(dt);
     const action = playing && input.gameplayEnabled ? this.readAction(canUse) : IDLE_ACTION;
 
     // --- Simulation (fixed step) ------------------------------------------------------------
@@ -518,8 +683,9 @@ export class WorldScene extends Phaser.Scene {
     const p = this.sim.player;
     const m = p.motor;
     const a = this.stepper.alpha;
-    const px = p.prevX + (m.x - p.prevX) * a;
-    const py = p.prevY + (m.y - p.prevY) * a;
+    const off = this.sim.renderOffset();
+    const px = p.prevX + (m.x - p.prevX) * a + off.x;
+    const py = p.prevY + (m.y - p.prevY) * a + off.y;
     if (playing) {
       const stack = p.inventory.get(p.selectedSlot);
       this.player.setHeldItem(stack?.itemId ?? null);
@@ -592,7 +758,7 @@ export class WorldScene extends Phaser.Scene {
     this.fx.updateAmbient(dt, view, sky.stars, this.treeTops(view), fires);
 
     if (playing) {
-      this.saves.update(dt);
+      this.saves?.update(dt);
       this.trackExplored(dt, view);
       this.combatView.publish(dt);
       this.social.update(dt, this.zoom);
@@ -864,7 +1030,21 @@ export class WorldScene extends Phaser.Scene {
       monsterSprites: this.combatView.monsters.count,
       adventurersActive: this.sim.adventurers.active.length,
       adventurerSprites: this.combatView.adventurers.count,
+      online: this.online !== null,
+      ready: this.online?.ready ?? true,
+      peers: this.sim.peers().length,
+      peerSprites: this.combatView.peers.count,
+      rtt: this.online ? Math.round(this.online.rtt) : 0,
+      correction: this.online ? this.takeCorrection() : 0,
     };
+  }
+
+  private takeCorrection(): number {
+    const o = this.online;
+    if (!o) return 0;
+    const c = o.maxCorrection;
+    o.maxCorrection = 0;
+    return Math.round(c * 100) / 100;
   }
 
   /** Test hook: active adventurers (key, position) for inspection tests. */
@@ -937,12 +1117,24 @@ export class WorldScene extends Phaser.Scene {
 
   /** Test hook: flush pending saves and resolve when written. */
   debugFlushSave(): Promise<void> {
-    return this.saves.flush();
+    return this.saves?.flush() ?? Promise.resolve();
+  }
+
+  /** Test hook: other players in view (online). */
+  debugPeers(): { key: string; name: string; x: number; y: number; level: number }[] {
+    return this.sim.peers().map((p) => ({
+      key: p.key,
+      name: p.name,
+      x: p.motor.x,
+      y: p.motor.y,
+      level: p.level,
+    }));
   }
 
   private shutdown(): void {
-    void this.saves.flush();
-    this.saves.dispose();
+    void this.saves?.flush();
+    this.saves?.dispose();
+    if (this.online && this.online.connection !== 'closed') this.online.close();
     this.scale.off(Phaser.Scale.Events.RESIZE, this.onResize, this);
     for (const u of this.unsubscribers) u();
     this.unsubscribers.length = 0;

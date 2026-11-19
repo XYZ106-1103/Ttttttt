@@ -37,6 +37,7 @@ export function PauseMenu() {
           {t('menu.controls')}
         </Button>
         <Button
+          testId="menu-title"
           variant="ghost"
           onClick={() => {
             close();

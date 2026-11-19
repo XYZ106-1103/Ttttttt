@@ -143,3 +143,19 @@ export function randomAppearance(seed: number): Appearance {
     rim: r.pick(RIMS),
   };
 }
+
+/**
+ * A player character's look from its stored appearance code: 0–2 are the designed presets,
+ * anything else seeds a random appearance (shown in the character creator before choosing).
+ */
+export function appearanceFromLook(look: number): Appearance {
+  const preset = APPEARANCE_PRESETS[look];
+  return look >= 0 && look < APPEARANCE_PRESETS.length && preset
+    ? preset
+    : randomAppearance(look >>> 0);
+}
+
+/** Texture id for a look (characters sharing a look share textures). */
+export function lookTextureId(look: number): string {
+  return `look-${look >>> 0}`;
+}

@@ -26,10 +26,21 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], viewport: { width: 1920, height: 1080 } },
     },
   ],
-  webServer: {
-    command: 'pnpm build && pnpm preview --port 4173 --strictPort',
-    url: 'http://127.0.0.1:4173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
-  },
+  webServer: [
+    {
+      command: 'pnpm build && pnpm preview --port 4173 --strictPort',
+      url: 'http://127.0.0.1:4173',
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+    },
+    {
+      // The game server for online play (in-memory storage: every run starts empty). The preview
+      // server proxies /api and /ws to it.
+      command: 'pnpm --filter @world/server exec tsx src/main.ts',
+      url: 'http://127.0.0.1:8787/api/health',
+      env: { PORT: '8787', HOST: '127.0.0.1', DATABASE_URL: '' },
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+  ],
 });

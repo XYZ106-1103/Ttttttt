@@ -3,7 +3,8 @@ import { itemRegistry, TILE_SIZE, tileRegistry } from '@world/shared';
 import { type Tileset, tileFrameIndex } from '../art/tiles/TilesetGenerator';
 import type { ViewRect } from '../render/ChunkRenderer';
 import { TEX } from '../render/textureKeys';
-import type { GameSimulation, UseIntent } from '../sim/GameSimulation';
+import type { ClientSim } from '../sim/ClientSim';
+import type { UseIntent } from '../sim/GameSimulation';
 
 /** How long (simulation seconds) a click waits for the tool cooldown before it is dropped. */
 const CLICK_BUFFER = 0.35;
@@ -110,7 +111,7 @@ export class InteractionController {
    * Per-frame update. Returns the use intent for this frame's simulation ticks, or null.
    * @param enabled false while menus/chat/title are active.
    */
-  update(view: ViewRect, zoom: number, sim: GameSimulation, enabled: boolean): UseIntent | null {
+  update(view: ViewRect, zoom: number, sim: ClientSim, enabled: boolean): UseIntent | null {
     const p = this.scene.input.activePointer;
     this.aim.x = view.left + p.x / zoom;
     this.aim.y = view.top + p.y / zoom;
@@ -155,7 +156,7 @@ export class InteractionController {
     return this.holding ? { tx, ty } : null;
   }
 
-  private updateCrack(sim: GameSimulation): void {
+  private updateCrack(sim: ClientSim): void {
     const hit = sim.player.hit;
     if (!hit || !hit.key.startsWith('t:')) {
       this.crack.setVisible(false);

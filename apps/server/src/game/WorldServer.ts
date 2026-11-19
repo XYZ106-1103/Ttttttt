@@ -55,12 +55,33 @@ function cleanChat(raw: string): string {
   return out;
 }
 
+/** A frame with the one-shot presses of an earlier, skipped frame folded in. */
+function mergePresses(skipped: InputFrame, into: InputFrame): InputFrame {
+  return {
+    seq: into.seq,
+    move: { ...into.move, jumpPressed: into.move.jumpPressed || skipped.move.jumpPressed },
+    use: into.use,
+    action: {
+      ...into.action,
+      attackPressed: into.action.attackPressed || skipped.action.attackPressed,
+      dodge: into.action.dodge || skipped.action.dodge,
+      skillSlot: into.action.skillSlot ?? skipped.action.skillSlot,
+      quickHeal: into.action.quickHeal || skipped.action.quickHeal,
+      quickMana: into.action.quickMana || skipped.action.quickMana,
+    },
+  };
+}
+
 /** Chunks around a player whose authoritative data is kept in sync. */
 const CHUNK_RX = 4;
 const CHUNK_RY = 3;
 const REPLICATE_EVERY = 3; // ticks → 20 Hz
 const PRIVATE_EVERY = 4; // replications → 5 Hz
 const MAX_BUFFERED = 2 * 1024 * 1024;
+/** Input frames buffered beyond this are trimmed (≈130 ms at 60 Hz). */
+const INPUT_BUFFER_FRAMES = 8;
+/** A player whose input is late holds still for at most this many ticks (≈130 ms). */
+const MAX_STALL_TICKS = 8;
 const NEAR_CHAT_TILES = 40;
 
 export class WorldServer {
@@ -152,35 +173,42 @@ export class WorldServer {
     if (this.tickMs.length > 600) this.tickMs.shift();
   }
 
+  /**
+   * Apply one input frame for this tick. The server applies exactly the frames the client sent,
+   * one per tick, in order, so the client's prediction (which replays the same frames) agrees.
+   * When a frame is late the player holds still for that tick (a short stall, capped) rather
+   * than guessing an input; after a longer gap (frozen tab, lost connection) they stand idle.
+   * Frames piling up beyond a small buffer are dropped (their presses carry over) so input
+   * latency stays bounded. Never more than one frame is applied per tick.
+   */
   private applyInput(s: Session): void {
     const slot = s.slot;
     if (!slot) return;
+    while (s.inputs.length > INPUT_BUFFER_FRAMES) {
+      const skipped = s.inputs.shift() as InputFrame;
+      s.ack = skipped.seq;
+      s.carry = s.carry ? mergePresses(s.carry, skipped) : skipped;
+    }
     const next = s.inputs.shift();
     if (next) {
+      const frame = s.carry ? mergePresses(s.carry, next) : next;
+      s.carry = null;
+      s.missingInputs = 0;
       s.ack = next.seq;
       s.lastInput = next;
-      slot.intent = { move: next.move, use: next.use, action: next.action };
-    } else if (s.lastInput) {
-      // No input arrived in time: keep holding what was held, drop one-shot presses.
-      const l = s.lastInput;
-      slot.intent = {
-        move: { ...l.move, jumpPressed: false },
-        use: l.use,
-        action: {
-          ...l.action,
-          attackPressed: false,
-          dodge: false,
-          skillSlot: null,
-          quickHeal: false,
-          quickMana: false,
-        },
-      };
-    } else
-      slot.intent = {
-        move: { moveX: 0, jumpHeld: false, jumpPressed: false, down: false },
-        use: null,
-        action: IDLE_ACTION,
-      };
+      slot.intent = { move: frame.move, use: frame.use, action: frame.action };
+      return;
+    }
+    s.missingInputs++;
+    if (s.lastInput && s.missingInputs <= MAX_STALL_TICKS) {
+      slot.stall = true;
+      return;
+    }
+    slot.intent = {
+      move: { moveX: 0, jumpHeld: false, jumpPressed: false, down: false },
+      use: null,
+      action: IDLE_ACTION,
+    };
   }
 
   // --- Replication --------------------------------------------------------------------------
@@ -501,6 +529,7 @@ export class WorldServer {
       admin: s.admin,
       seed: this.sim.seed,
       worldId: this.config.worldId,
+      adventurers: this.sim.adventurers.all.length,
       dayLength: this.sim.clock.dayLengthSeconds,
       hour: this.sim.clock.timeOfDay,
       day: this.sim.clock.day,

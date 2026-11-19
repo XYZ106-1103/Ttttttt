@@ -19,7 +19,9 @@ import { nameOf, socialParams, spokenText } from '../social/socialText';
 import { AdventurerRenderer } from '../render/AdventurerRenderer';
 import { MonsterRenderer } from '../render/MonsterRenderer';
 import { ProjectileRenderer } from '../render/ProjectileRenderer';
-import type { GameSimulation, SimNotice } from '../sim/GameSimulation';
+import type { ClientSim } from '../sim/ClientSim';
+import type { SimNotice } from '../sim/GameSimulation';
+import { PeerRenderer } from '../render/PeerRenderer';
 
 const MONSTER_COLOR: Record<string, number> = {
   dew_slime: 0x6fd890,
@@ -59,6 +61,7 @@ function hex(c: string): number {
 export class CombatPresenter {
   readonly monsters: MonsterRenderer;
   readonly adventurers: AdventurerRenderer;
+  readonly peers: PeerRenderer;
   private readonly projectiles: ProjectileRenderer;
   private readonly numbers: DamageNumbers;
   readonly fx: CombatFx;
@@ -77,7 +80,7 @@ export class CombatPresenter {
     worldLayer: Phaser.GameObjects.Layer,
     overlayLayer: Phaser.GameObjects.Layer,
     labelLayer: Phaser.GameObjects.Layer,
-    private readonly sim: GameSimulation,
+    private readonly sim: ClientSim,
     private readonly view: CharacterView,
     private readonly camera: CameraController,
     private readonly stores: Stores,
@@ -90,8 +93,11 @@ export class CombatPresenter {
       name: (a) => nameOf(sim, a.key),
       line: (a, line, params) => spokenText(sim, a.key, line, params),
       params: (params) => socialParams(sim, params),
-      partyMate: (a) => sim.society.parties.same('player', a.key),
+      partyMate: (a) => sim.society.parties.same(sim.selfKey, a.key),
     });
+    this.peers = new PeerRenderer(scene, worldLayer, labelLayer, sim.world, this.fx, (k) =>
+      sim.society.parties.same(sim.selfKey, k),
+    );
   }
 
   /** Accent color for the player's weapon trails. */
@@ -153,6 +159,22 @@ export class CombatPresenter {
           t('adv.jobChat', { name: a.profile.name.ko, job: t(`job.${e.jobId}`) }),
         );
     }
+    const peer = (id: number) => this.sim.peers().find((x) => x.id === id);
+    for (const { id, event } of ev.peerActor) {
+      const pl = peer(id);
+      if (pl) this.peers.onAction(pl, event, now);
+    }
+    for (const { id, out } of ev.peerUses) {
+      const pl = peer(id);
+      if (pl) this.peers.onUse(pl, out, now);
+    }
+    for (const { id } of ev.peerLevelUps) {
+      const pl = peer(id);
+      if (pl) this.peers.onLevelUp(pl);
+    }
+    ev.peerActor.length = 0;
+    ev.peerUses.length = 0;
+    ev.peerLevelUps.length = 0;
     ev.aiActor.length = 0;
     ev.aiUses.length = 0;
     ev.aiLevelUps.length = 0;
@@ -255,7 +277,9 @@ export class CombatPresenter {
       case 'damage': {
         const isPlayer = e.targetId === p.id;
         const isAdventurer =
-          !isPlayer && this.sim.adventurers.byCharacter(e.targetId) !== undefined;
+          !isPlayer &&
+          (this.sim.adventurers.byCharacter(e.targetId) !== undefined ||
+            this.sim.peers().some((x) => x.id === e.targetId));
         const style =
           isPlayer || isAdventurer ? 'hurt' : e.source === 'dot' ? 'dot' : e.crit ? 'crit' : 'dmg';
         this.numbers.spawn(e.amount, e.x, e.y - 2, style, String(e.targetId));
@@ -485,7 +509,11 @@ export class CombatPresenter {
     }
     this.monsters.update(this.sim.monsters.monsters, alpha, now, dt);
     this.projectiles.update(this.sim.combat.projectiles, dt);
-    this.adventurers.update(this.sim.adventurers.active, alpha, now, dt, zoom);
+    this.peers.update(this.sim.peers(), (k) => this.sim.peerLook(k), alpha, now, dt, zoom);
+    this.adventurers.update(this.sim.adventurers.active, alpha, now, dt, zoom, [
+      ...this.peers.tagViews,
+      this.view,
+    ]);
     this.numbers.update(dt);
     this.fx.update(dt, now);
   }
@@ -575,6 +603,7 @@ export class CombatPresenter {
   destroy(): void {
     this.monsters.destroy();
     this.adventurers.destroy();
+    this.peers.destroy();
     this.projectiles.destroy();
     this.numbers.destroy();
     this.fx.destroy();

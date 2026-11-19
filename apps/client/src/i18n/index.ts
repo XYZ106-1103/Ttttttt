@@ -70,3 +70,8 @@ export function josa(text: string): string {
   }
   return out;
 }
+
+/** Whether a message key exists (for keys built from server codes). */
+export function hasMessage(key: string): boolean {
+  return key in (ko as Record<string, string>);
+}

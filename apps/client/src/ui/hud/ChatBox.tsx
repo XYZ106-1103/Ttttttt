@@ -4,6 +4,19 @@ import { t } from '../../i18n';
 import { useServices } from '../context';
 import { useStore } from '../hooks/useStore';
 
+const DEV_COMMANDS = new Set([
+  'time',
+  'tp',
+  'spawn',
+  'level',
+  'summon',
+  'give',
+  'heal',
+  'gold',
+  'peace',
+  'monsters',
+]);
+
 /**
  * Chat & system log. PHASE 1 chat is local only (no server); PHASE 6 routes it through the
  * WebSocket gateway. Slash commands are developer tools and will be permission-checked
@@ -35,7 +48,13 @@ export function ChatBox() {
 
   const runCommand = (line: string): void => {
     const [cmd, ...args] = line.slice(1).trim().split(/\s+/);
-    switch ((cmd ?? '').toLowerCase()) {
+    const name = (cmd ?? '').toLowerCase();
+    // Online, developer commands are checked by the server; non-admins are told up front.
+    if (DEV_COMMANDS.has(name) && bridge.isOnline() && !bridge.isAdmin()) {
+      pushChat(stores, 'system', t('chat.adminOnly'));
+      return;
+    }
+    switch (name) {
       case 'help':
         pushChat(stores, 'system', t('chat.help'));
         break;
@@ -140,6 +159,7 @@ export function ChatBox() {
   const submit = (): void => {
     const text = draft.trim().slice(0, 200);
     if (text.startsWith('/')) runCommand(text);
+    else if (text && bridge.isOnline()) bridge.sendChat('all', text);
     else if (text) pushChat(stores, 'local', text, playerName);
     close();
   };

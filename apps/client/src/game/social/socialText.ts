@@ -11,18 +11,18 @@ import {
   toneOf,
 } from '@world/shared';
 import { getLanguage, t } from '../../i18n';
-import type { GameSimulation } from '../sim/GameSimulation';
+import type { ClientSim } from '../sim/ClientSim';
 
 const NAME_KEYS = new Set(['other', 'name', 'who', 'a', 'b']);
 
-export function nameOf(sim: GameSimulation, key: string): string {
-  if (key === 'player') return sim.player.name;
+export function nameOf(sim: ClientSim, key: string): string {
+  if (key === 'player' || key === sim.selfKey) return sim.player.name;
   const a = sim.adventurers.byKey(key);
-  if (!a) return key;
+  if (!a) return sim.characterByKey(key)?.name ?? key;
   return getLanguage() === 'en' ? a.profile.name.en : a.profile.name.ko;
 }
 
-export function guildName(sim: GameSimulation, id: string): string {
+export function guildName(sim: ClientSim, id: string): string {
   const g = sim.society.guilds.get(id);
   if (!g) return '?';
   return getLanguage() === 'en' ? g.name.en : g.name.ko;
@@ -35,7 +35,7 @@ export function itemName(id: string): string {
 
 /** Resolve ids in params into display text. Comma-separated key lists become name lists. */
 export function socialParams(
-  sim: GameSimulation,
+  sim: ClientSim,
   params: Readonly<Record<string, string | number>> | undefined,
 ): Record<string, string | number> {
   const out: Record<string, string | number> = {};
@@ -69,7 +69,7 @@ export function lineText(
 
 /** A line spoken by an adventurer (key) with params resolved. */
 export function spokenText(
-  sim: GameSimulation,
+  sim: ClientSim,
   speaker: string,
   line: string,
   params?: Readonly<Record<string, string | number>>,
@@ -83,6 +83,6 @@ export function relationText(label: RelationLabel): string {
   return t(`rel.${label}`);
 }
 
-export function playerRelation(sim: GameSimulation, key: string): RelationLabel {
-  return relationLabel(sim.adventurers.byKey(key)?.memory.relations.get('player'));
+export function playerRelation(sim: ClientSim, key: string): RelationLabel {
+  return relationLabel(sim.adventurers.byKey(key)?.memory.relations.get(sim.selfKey));
 }

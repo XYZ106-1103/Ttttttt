@@ -44,6 +44,10 @@ export class Session {
   slot: PlayerSlot | null = null;
   readonly inputs: InputFrame[] = [];
   lastInput: InputFrame | null = null;
+  /** Consecutive ticks without a fresh input. */
+  missingInputs = 0;
+  /** One-shot presses of skipped frames, applied with the next frame. */
+  carry: InputFrame | null = null;
   /** Highest input sequence applied. */
   ack = 0;
   /** Protocol violations; too many and the client is disconnected. */

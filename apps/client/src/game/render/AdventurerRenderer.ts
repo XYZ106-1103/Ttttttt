@@ -154,6 +154,8 @@ export class AdventurerRenderer {
     now: number,
     dt: number,
     zoom: number,
+    /** Other name tags in the crowd (players) that take part in stacking. */
+    extraTags: readonly CharacterView[] = [],
   ): void {
     const seen = new Set<string>();
     this.textures.flush();
@@ -222,7 +224,7 @@ export class AdventurerRenderer {
         s.bubble.setVisible(true).setPosition(anchor.x, Math.round((y - 50) * zoom));
       } else s.bubble.setVisible(false);
     }
-    this.unstackTags();
+    this.unstackTags(extraTags);
     for (const [key, s] of this.views) {
       if (seen.has(key)) continue;
       s.view.destroy();
@@ -232,17 +234,17 @@ export class AdventurerRenderer {
   }
 
   /** In a crowd, name tags that would overlap are stacked into rows below each other. */
-  private unstackTags(): void {
-    const tags = [...this.views.values()]
-      .map((s) => ({ s, b: s.view.tagBounds }))
+  private unstackTags(extra: readonly CharacterView[]): void {
+    const tags = [...[...this.views.values()].map((s) => s.view), ...extra]
+      .map((view) => ({ view, b: view.tagBounds }))
       .sort((x, y) => x.b.left - y.b.left);
     const rows: { right: number; y: number }[][] = [];
-    for (const { s, b } of tags) {
+    for (const { view, b } of tags) {
       let row = 0;
       while (row < 3 && (rows[row] ?? []).some((r) => r.right > b.left && Math.abs(r.y - b.y) < 24))
         row++;
       (rows[row] ??= []).push({ right: b.right + 2, y: b.y });
-      s.view.stackTag(row);
+      view.stackTag(row);
     }
   }
 

@@ -167,6 +167,15 @@ export class Bot {
     for (let i = 0; i < frames.length; i += 8) this.ws.send(encodeInputs(frames.slice(i, i + 8)));
   }
 
+  /** Send the same input as a real client would: one frame per tick, in real time. */
+  async hold(frame: Partial<Omit<InputFrame, 'seq'>>, seconds: number): Promise<void> {
+    const end = Date.now() + seconds * 1000;
+    while (Date.now() < end) {
+      this.input(frame, 2);
+      await sleep(33);
+    }
+  }
+
   get last(): Snapshot | undefined {
     return this.snapshots.at(-1);
   }

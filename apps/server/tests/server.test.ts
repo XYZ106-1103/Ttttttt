@@ -108,6 +108,21 @@ describe('game connection', () => {
     bob.close();
   });
 
+  it('a client that stops sending input stands still instead of running on', async () => {
+    const a = await newPlayer(srv.url, 'a@x.dev', 'Alice');
+    const alice = await Bot.join(srv.url, a.token, a.char);
+    await sleep(300);
+    const move = { moveX: 1, jumpHeld: false, jumpPressed: false, down: false };
+    await alice.hold({ move }, 0.5);
+    // The client freezes (background tab, lost packets): no more frames.
+    await sleep(500);
+    const p = srv.world.sim.playerOf('pc:' + a.char);
+    const x0 = p?.motor.x ?? 0;
+    await sleep(500);
+    expect(Math.abs((p?.motor.x ?? 0) - x0)).toBeLessThan(2);
+    alice.close();
+  });
+
   it('delivers chat by channel and lets players party up', async () => {
     const a = await newPlayer(srv.url, 'a@x.dev', 'Alice');
     const b = await newPlayer(srv.url, 'b@x.dev', 'Bob');
@@ -205,7 +220,7 @@ describe('game connection', () => {
     const tx = Math.floor(p.motor.x / TILE_SIZE) + 2;
     const ty = Math.round(p.motor.y / TILE_SIZE);
     // Alice digs with the pickaxe (slot 0) by holding "use" on a tile.
-    alice.input({ use: { tx, ty } }, 90);
+    await alice.hold({ use: { tx, ty } }, 1.5);
     const tiles = await bob.waitFor(
       (m) =>
         m.t === 'ev' &&

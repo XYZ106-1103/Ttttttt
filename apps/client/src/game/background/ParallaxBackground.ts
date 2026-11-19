@@ -61,6 +61,8 @@ export class ParallaxBackground {
     arts: readonly ParallaxLayerArt[],
     private readonly horizonWorldY: number,
   ) {
+    // A restarted scene (new world, online/offline switch) recreates it.
+    if (scene.textures.exists(TEX.sky)) scene.textures.remove(TEX.sky);
     const tex = scene.textures.createCanvas(TEX.sky, 1, 128);
     if (!tex) throw new Error('sky texture');
     tex.setFilter(Phaser.Textures.FilterMode.LINEAR);

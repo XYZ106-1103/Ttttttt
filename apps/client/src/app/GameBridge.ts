@@ -1,4 +1,12 @@
-import type { CraftResult, EquipFail, EquipSlotId, LearnFail, StatKey, World } from '@world/shared';
+import type {
+  ChatChannelId,
+  CraftResult,
+  EquipFail,
+  EquipSlotId,
+  LearnFail,
+  StatKey,
+  World,
+} from '@world/shared';
 import type { TownServices } from '@world/shared';
 
 /**
@@ -8,6 +16,10 @@ import type { TownServices } from '@world/shared';
 export interface GameCommands {
   startGame(): void;
   returnToTitle(): void;
+  /** Connect to the game server with a character; resolves with an error code or null. */
+  startOnline(token: string, characterId: number): Promise<string | null>;
+  /** Send a chat message to the server (online play). */
+  sendChat(channel: ChatChannelId, text: string, to?: string): void;
   /** Developer command (/time). PHASE 6 restricts to admins server-side. */
   setTimeOfDay(hours: number): void;
   /** Developer command (/tp, /spawn). Places the player's feet on top of tile (x, y). */
@@ -37,6 +49,10 @@ export interface GameCommands {
 }
 
 export interface GameQueries {
+  /** Playing on the server (false: offline single player). */
+  isOnline(): boolean;
+  /** Developer commands are allowed (offline always; online for admin accounts). */
+  isAdmin(): boolean;
   getWorld(): World | null;
   getPlayerTile(): { x: number; y: number } | null;
   /** Chunk indices seen by the player (world map fog of war). */
@@ -70,6 +86,18 @@ export class GameBridge implements GameCommands, GameQueries {
   }
   returnToTitle(): void {
     this.impl?.returnToTitle();
+  }
+  async startOnline(token: string, characterId: number): Promise<string | null> {
+    return this.impl ? this.impl.startOnline(token, characterId) : 'not_ready';
+  }
+  sendChat(channel: ChatChannelId, text: string, to?: string): void {
+    this.impl?.sendChat(channel, text, to);
+  }
+  isOnline(): boolean {
+    return this.impl?.isOnline() ?? false;
+  }
+  isAdmin(): boolean {
+    return this.impl?.isAdmin() ?? false;
   }
   setTimeOfDay(hours: number): void {
     this.impl?.setTimeOfDay(hours);

@@ -20,7 +20,7 @@ import {
 } from '../../app/stores';
 import { openWindow } from '../../ui/windowActions';
 import { NpcRenderer } from '../render/NpcRenderer';
-import type { GameSimulation } from '../sim/GameSimulation';
+import type { ClientSim } from '../sim/ClientSim';
 import { guildName, itemName, nameOf, socialParams, spokenText } from './socialText';
 
 /** How far (tiles) conversations of adventurers are heard in the chat log. */
@@ -43,7 +43,7 @@ export class SocialPresenter {
     scene: Phaser.Scene,
     worldLayer: Phaser.GameObjects.Layer,
     labelLayer: Phaser.GameObjects.Layer,
-    private readonly sim: GameSimulation,
+    private readonly sim: ClientSim,
     private readonly stores: Stores,
   ) {
     this.npcs = new NpcRenderer(scene, worldLayer, labelLayer, sim.world, sim.town.npcs);
@@ -108,7 +108,7 @@ export class SocialPresenter {
     const sim = this.sim;
     const eco = sim.economy;
     const p = sim.player;
-    const box = eco.market.peekMail('player');
+    const box = eco.market.peekMail(sim.selfKey);
     const ui = this.stores.ui.get();
     const exchangeOpen = ui.windows.includes('exchange');
     const shopOpen = ui.windows.includes('shop');
@@ -121,8 +121,8 @@ export class SocialPresenter {
         itemId: l.itemId,
         count: l.count,
         price: l.price,
-        seller: l.seller === 'player' ? p.name : nameOf(sim, l.seller),
-        mine: l.seller === 'player',
+        seller: l.seller === sim.selfKey ? p.name : nameOf(sim, l.seller),
+        mine: l.seller === sim.selfKey,
         left: Math.max(0, l.expiresAt - sim.time),
       }));
     }
@@ -182,25 +182,25 @@ export class SocialPresenter {
     const society = sim.society;
     const pm = sim.player.motor;
     const near = (x: number) => Math.abs(x - pm.x) < 40 * TILE_SIZE;
-    const party = society.parties.of('player');
+    const party = society.parties.of(sim.selfKey);
     // Party join/leave messages.
     const keys = party?.members ?? [];
     for (const k of keys)
-      if (!this.partyKeys.includes(k) && k !== 'player' && this.partyKeys.length > 0)
+      if (!this.partyKeys.includes(k) && k !== sim.selfKey && this.partyKeys.length > 0)
         pushChat(this.stores, 'party', t('party.joined', { name: nameOf(sim, k) }));
     for (const k of this.partyKeys)
-      if (!keys.includes(k) && k !== 'player')
+      if (!keys.includes(k) && k !== sim.selfKey)
         pushChat(this.stores, 'party', t('party.left', { name: nameOf(sim, k) }));
     if (keys.length === 0 && this.partyKeys.length > 0)
       pushChat(this.stores, 'party', t('party.disbanded'));
     if (keys.length > 0 && this.partyKeys.length === 0)
       for (const k of keys)
-        if (k !== 'player')
+        if (k !== sim.selfKey)
           pushChat(this.stores, 'party', t('party.joined', { name: nameOf(sim, k) }));
     this.partyKeys = [...keys];
 
     const member = (k: string) => {
-      if (k === 'player') {
+      if (k === sim.selfKey) {
         const p = sim.player;
         return {
           key: k,
@@ -227,7 +227,7 @@ export class SocialPresenter {
         near: c ? near(c.motor.x) : false,
       };
     };
-    const g = society.guilds.of('player');
+    const g = society.guilds.of(sim.selfKey);
     let guild: GuildView | null = null;
     if (g) {
       guild = {
@@ -237,7 +237,7 @@ export class SocialPresenter {
         leaderName: nameOf(sim, g.leader),
         fame: g.fame,
         members: g.members.map((k) => {
-          const c = k === 'player' ? sim.player : sim.adventurers.byKey(k)?.character;
+          const c = k === sim.selfKey ? sim.player : sim.adventurers.byKey(k)?.character;
           return {
             key: k,
             name: nameOf(sim, k),
@@ -261,7 +261,7 @@ export class SocialPresenter {
     const nearNpc = sim.town.npcs.find((n) => sim.town.near(n.def.id))?.def.id ?? null;
     this.stores.social.set({
       party: party ? party.members.map(member) : null,
-      partyLeader: party?.leader === 'player',
+      partyLeader: party?.leader === sim.selfKey,
       guild,
       guilds: society.guilds.all
         .map((x) => ({
@@ -309,10 +309,10 @@ export class SocialPresenter {
         maxHp: c.stats.maxHp,
         alive: c.alive,
         x: Math.floor(c.motor.x / TILE_SIZE) - spawnX,
-        affinity: a.memory.relations.get('player')?.affinity ?? 0,
-        relation: relationLabel(a.memory.relations.get('player')),
+        affinity: a.memory.relations.get(sim.selfKey)?.affinity ?? 0,
+        relation: relationLabel(a.memory.relations.get(sim.selfKey)),
         guild: g ? guildName(sim, g.id) : null,
-        partyMate: sim.society.parties.same('player', a.key),
+        partyMate: sim.society.parties.same(sim.selfKey, a.key),
       };
     };
     const list = sim.adventurers.all.map(summary);
@@ -321,7 +321,7 @@ export class SocialPresenter {
     let detail: AdventurerDetail | null = null;
     if (a) {
       const g = a.goal;
-      const rel = a.memory.relations.get('player');
+      const rel = a.memory.relations.get(sim.selfKey);
       const goalParams = (): Record<string, string | number> => {
         if (!g) return {};
         switch (g.kind) {
@@ -340,7 +340,7 @@ export class SocialPresenter {
         }
       };
       const ties = [...a.memory.relations.entries()]
-        .filter(([k, r]) => k !== 'player' && Math.abs(r.affinity) >= 0.2)
+        .filter(([k, r]) => k !== sim.selfKey && Math.abs(r.affinity) >= 0.2)
         .sort((x, y) => Math.abs(y[1].affinity) - Math.abs(x[1].affinity))
         .slice(0, 5)
         .map(([k, r]) => ({

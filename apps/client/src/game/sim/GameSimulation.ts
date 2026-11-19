@@ -1,5 +1,7 @@
+import type { ClientSim } from './ClientSim';
 import {
   type ActionIntent,
+  type Character,
   type ActorEvent,
   type AdventurerDirector,
   type BrainEvent,
@@ -83,6 +85,36 @@ export interface SimEvents {
   sales: SaleRecord[];
   /** Social outcomes (party/guild changes, trades). */
   social: SocialEvent[];
+  /** Other players' actions, uses and level-ups (online play). */
+  peerActor: { id: number; event: ActorEvent }[];
+  peerUses: { id: number; out: UseOutcome }[];
+  peerLevelUps: { id: number; level: number }[];
+}
+
+export function newSimEvents(): SimEvents {
+  return {
+    uses: [],
+    pickups: [],
+    failed: null,
+    combat: [],
+    monster: [],
+    actor: [],
+    levelUps: [],
+    exp: [],
+    notices: [],
+    aiActor: [],
+    aiUses: [],
+    aiLevelUps: [],
+    ai: [],
+    spoken: [],
+    news: [],
+    invites: [],
+    sales: [],
+    social: [],
+    peerActor: [],
+    peerUses: [],
+    peerLevelUps: [],
+  };
 }
 
 export interface SimulationOptions {
@@ -102,35 +134,19 @@ export interface SimulationOptions {
 
 /** Key of the offline local player. */
 export const LOCAL_PLAYER = 'player';
+const NO_OFFSET = { x: 0, y: 0 } as const;
 
 /**
  * Offline (single-player) simulation: the shared WorldSim with one local player, plus the
  * single-player command API and event view the renderer and UI use. Online play runs the same
  * WorldSim on the server instead.
  */
-export class GameSimulation {
+export class GameSimulation implements ClientSim {
   readonly core: WorldSim;
   readonly local: PlayerSlot;
-  readonly events: SimEvents = {
-    uses: [],
-    pickups: [],
-    failed: null,
-    combat: [],
-    monster: [],
-    actor: [],
-    levelUps: [],
-    exp: [],
-    notices: [],
-    aiActor: [],
-    aiUses: [],
-    aiLevelUps: [],
-    ai: [],
-    spoken: [],
-    news: [],
-    invites: [],
-    sales: [],
-    social: [],
-  };
+  readonly events: SimEvents = newSimEvents();
+  readonly online = false;
+  readonly selfKey = LOCAL_PLAYER;
 
   constructor(options: SimulationOptions) {
     this.core = new WorldSim({
@@ -209,6 +225,20 @@ export class GameSimulation {
   }
   get playTime(): number {
     return this.local.playTime;
+  }
+  /** Offline there are no other players. */
+  peers(): readonly Player[] {
+    return [];
+  }
+  peerLook(): number {
+    return 0;
+  }
+  characterByKey(key: string): Character | null {
+    if (key === LOCAL_PLAYER) return this.player;
+    return this.core.adventurers.byKey(key)?.character ?? null;
+  }
+  renderOffset(): { x: number; y: number } {
+    return NO_OFFSET;
   }
 
   // --- Simulation ---------------------------------------------------------------------------

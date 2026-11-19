@@ -15,6 +15,8 @@ export interface AppState {
   readonly hasSave: boolean;
   /** Saves survive reloads (false when IndexedDB is unavailable). */
   readonly persistent: boolean;
+  /** Message shown on the title screen (e.g. why an online session ended). */
+  readonly notice: string | null;
 }
 
 export interface InventoryState {
@@ -356,8 +358,20 @@ export interface DialogueState {
   readonly seq: number;
 }
 
+/** Online connection status (offline play: mode 'offline'). */
+export interface NetState {
+  readonly mode: 'offline' | 'online';
+  readonly state: 'online' | 'reconnecting' | 'closed';
+  /** Round-trip time to the server (ms). */
+  readonly rtt: number;
+  readonly admin: boolean;
+  /** Other players in view. */
+  readonly peers: number;
+}
+
 export interface Stores {
   readonly app: Store<AppState>;
+  readonly net: Store<NetState>;
   readonly player: Store<PlayerState>;
   readonly world: Store<WorldState>;
   readonly chat: Store<ChatState>;
@@ -377,6 +391,13 @@ const ZERO_STATS = { str: 0, dex: 0, int: 0, vit: 0, luk: 0 };
 
 export function createStores(): Stores {
   return {
+    net: createStore<NetState>({
+      mode: 'offline',
+      state: 'online',
+      rtt: 0,
+      admin: false,
+      peers: 0,
+    }),
     app: createStore<AppState>({
       phase: 'booting',
       bootProgress: 0,
@@ -385,6 +406,7 @@ export function createStores(): Stores {
       fade: 1,
       hasSave: false,
       persistent: true,
+      notice: null,
     }),
     player: createStore<PlayerState>({
       name: '',
