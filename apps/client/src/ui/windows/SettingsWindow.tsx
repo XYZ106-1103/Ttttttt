@@ -73,6 +73,31 @@ export function SettingsWindow(props: {
             </Button>
           </div>
         </div>
+        {(
+          [
+            ['masterVolume', 'settings.volumeMaster'],
+            ['musicVolume', 'settings.volumeMusic'],
+            ['sfxVolume', 'settings.volumeSfx'],
+          ] as const
+        ).map(([key, label]) => (
+          <div className="pw-setting" key={key}>
+            <span>{t(label)}</span>
+            <div className="pw-volume">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={Math.round(s[key] * 100)}
+                onChange={(e) => set({ [key]: Number(e.target.value) / 100 })}
+                onKeyDown={(e) => e.stopPropagation()}
+                aria-label={t(label)}
+                data-testid={`setting-${key}`}
+              />
+              <span className="pw-volume__value">{Math.round(s[key] * 100)}</span>
+            </div>
+          </div>
+        ))}
         <div className="pw-setting">
           <span>{t('settings.language')}</span>
           <div className="pw-seg">

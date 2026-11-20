@@ -8,6 +8,9 @@ import { EMPTY_SAVE, openSaveStore } from './game/persistence/SaveStore';
 import type { GameServices } from './game/services';
 import { setLanguage, t } from './i18n';
 import { InputManager } from './input/InputManager';
+import { AudioEngine } from './game/audio/AudioEngine';
+import type { SfxName } from './game/audio/sfx';
+import type { ThemeId } from './game/audio/music';
 import { UiContext } from './ui/context';
 import { loadFonts } from './ui/fonts';
 import { UiRoot } from './ui/UiRoot';
@@ -29,6 +32,21 @@ async function bootstrap(): Promise<void> {
   input.attach(window as unknown as Parameters<InputManager['attach']>[0]);
   const bridge = new GameBridge();
   const icons: Record<string, string> = {};
+  const audio = new AudioEngine();
+  const applyVolumes = (): void => {
+    const s = stores.settings.get();
+    audio.setVolumes({ master: s.masterVolume, music: s.musicVolume, sfx: s.sfxVolume });
+  };
+  applyVolumes();
+  stores.settings.subscribe(applyVolumes);
+  // Window open/close sounds.
+  let openWindows = stores.ui.get().windows.length;
+  stores.ui.subscribe(() => {
+    const n = stores.ui.get().windows.length;
+    if (n > openWindows) audio.play('ui_open');
+    else if (n < openWindows) audio.play('ui_close');
+    openWindows = n;
+  });
 
   const uiRoot = document.getElementById('ui-root');
   const gameRoot = document.getElementById('game-root');
@@ -36,7 +54,7 @@ async function bootstrap(): Promise<void> {
 
   createRoot(uiRoot).render(
     <StrictMode>
-      <UiContext.Provider value={{ stores, bridge, input, icons }}>
+      <UiContext.Provider value={{ stores, bridge, input, icons, audio }}>
         <UiRoot />
       </UiContext.Provider>
     </StrictMode>,
@@ -56,6 +74,7 @@ async function bootstrap(): Promise<void> {
     playerAppearance: PLAYER_APPEARANCE,
     saveStore,
     icons,
+    audio,
   };
   const game = createGame(gameRoot, services);
 
@@ -88,6 +107,15 @@ async function bootstrap(): Promise<void> {
     summon: (id: string) => scene()?.debugSummon?.(id),
     stores,
     bridge,
+    audio: () => audio.stats(),
+    /** Render sounds offline and measure them (quality checks); returns WAV as base64. */
+    renderAudio: async (what: { sfx: SfxName[] } | { theme: ThemeId; seconds: number }) => {
+      const r = await AudioEngine.renderOffline(what);
+      let bin = '';
+      for (let i = 0; i < r.wav.length; i += 0x8000)
+        bin += String.fromCharCode(...r.wav.subarray(i, i + 0x8000));
+      return { peak: r.peak, rms: r.rms, seconds: r.seconds, perSound: r.perSound, wav: btoa(bin) };
+    },
   };
   // Development builds only: full access for debugging from the console. Never in production.
   if (import.meta.env.DEV) (window as unknown as { __PW_GAME__: unknown }).__PW_GAME__ = game;

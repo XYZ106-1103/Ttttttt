@@ -1,6 +1,7 @@
 import type { GameBridge } from '../app/GameBridge';
 import type { Stores } from '../app/stores';
 import type { InputManager } from '../input/InputManager';
+import type { AudioEngine } from './audio/AudioEngine';
 import type { ParallaxLayerArt } from './art/background/BackgroundArt';
 import type { Appearance } from './art/character/appearance';
 import type { Tileset } from './art/tiles/TilesetGenerator';
@@ -22,6 +23,7 @@ export interface GameServices {
   readonly assets: GeneratedAssets;
   readonly playerAppearance: Appearance;
   readonly saveStore: SaveStore;
+  readonly audio: AudioEngine;
   /** Item id → data URL icon, filled at boot for the DOM UI. */
   readonly icons: Record<string, string>;
 }

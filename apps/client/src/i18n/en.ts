@@ -1083,4 +1083,7 @@ export const en: Record<MessageKey, string> = {
   'fail.no_invite': 'No invitation to answer.',
   'fail.disconnected': 'Not connected to the server.',
   'fail.rate_limited': 'Slow down a little.',
+  'settings.volumeMaster': 'Master volume',
+  'settings.volumeMusic': 'Music',
+  'settings.volumeSfx': 'Sound effects',
 };

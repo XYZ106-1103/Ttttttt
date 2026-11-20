@@ -2604,3 +2604,20 @@ body {
   gap: 8px;
   justify-content: flex-end;
 }
+
+/* --- Volume sliders ---------------------------------------------------------------------- */
+.pw-volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pw-volume input[type='range'] {
+  width: 150px;
+  accent-color: var(--gold);
+}
+.pw-volume__value {
+  min-width: 28px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-faint);
+}

@@ -44,6 +44,7 @@ import type { GameServices } from '../services';
 import { type ActionIntent, GameSimulation, IDLE_ACTION } from '../sim/GameSimulation';
 import type { ClientSim } from '../sim/ClientSim';
 import { OnlineSimulation } from '../sim/OnlineSimulation';
+import { GameAudio } from '../audio/GameAudio';
 import { socketUrl } from '../../net/endpoint';
 import { NetClient, type ServerJson, type Welcome } from '../../net/NetClient';
 import { appearanceFromLook, lookTextureId } from '../art/character/appearance';
@@ -114,6 +115,7 @@ export class WorldScene extends Phaser.Scene {
   private saves: SaveManager | null = null;
   private combatView!: CombatPresenter;
   private social!: SocialPresenter;
+  private gameAudio!: GameAudio;
   private publishedPlayerVersion = -1;
   private publishedEquipVersion = -1;
   private playerPublishTimer = 0;
@@ -248,6 +250,7 @@ export class WorldScene extends Phaser.Scene {
       this.cameraCtl,
       stores,
     );
+    this.gameAudio = new GameAudio(this.services.audio, this.sim);
     this.social = new SocialPresenter(this, this.worldLayer, this.labelLayer, this.sim, stores);
     this.saves =
       this.sim instanceof GameSimulation
@@ -477,6 +480,9 @@ export class WorldScene extends Phaser.Scene {
         }
         const text = String(m.text ?? '');
         const name = String(m.name ?? '');
+        const fromOther = m.from !== this.sim.selfKey;
+        if (fromOther && (m.ch === 'whisper' || m.ch === 'party'))
+          this.services.audio.play('notify');
         if (m.ch === 'party') pushChat(stores, 'party', `${name}: ${text}`);
         else if (m.ch === 'guild') pushChat(stores, 'guild', text, name);
         else if (m.ch === 'near') pushChat(stores, 'nearby', text, name);
@@ -515,10 +521,12 @@ export class WorldScene extends Phaser.Scene {
           ],
         }));
         pushChat(stores, 'party', t('player.invitedYou', { name }));
+        this.services.audio.play('notify');
         break;
       }
       case 'tradeRequest':
         stores.players.set({ request: { from: String(m.from ?? ''), name: String(m.name ?? '') } });
+        this.services.audio.play('notify');
         break;
       case 'trade': {
         const offer = (v: unknown): TradeOfferView => {
@@ -545,7 +553,10 @@ export class WorldScene extends Phaser.Scene {
           stores.players.set({ trade: null });
           closeWindow(stores, 'playerTrade');
           showToast(stores, t(`ptrade.${String(m.state)}`, { name }));
-          if (m.state === 'done') pushChat(stores, 'trade', t('ptrade.done', { name }));
+          if (m.state === 'done') {
+            pushChat(stores, 'trade', t('ptrade.done', { name }));
+            this.services.audio.play('trade');
+          }
         }
         break;
       }
@@ -782,6 +793,7 @@ export class WorldScene extends Phaser.Scene {
     } else {
       this.stepper.advance(dt, () => this.sim.tickAmbient(SIM_DT));
     }
+    if (playing) this.gameAudio.consume(this.frameEvents);
     this.consumeSimEvents();
     this.combatView.consume(this.zoom);
 
@@ -870,6 +882,10 @@ export class WorldScene extends Phaser.Scene {
       this.social.update(dt, this.zoom);
     }
     this.evictFarChunks(dt, view);
+    this.gameAudio.update(dt, this.mode, {
+      x: view.left + view.width / 2,
+      y: view.top + view.height / 2,
+    });
     this.publish(dt);
   }
 

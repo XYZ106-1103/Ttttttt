@@ -1076,6 +1076,9 @@ export const ko = {
   'fail.no_invite': '받은 초대가 없습니다.',
   'fail.disconnected': '서버와 연결되어 있지 않습니다.',
   'fail.rate_limited': '너무 빠르게 요청하고 있습니다.',
+  'settings.volumeMaster': '전체 음량',
+  'settings.volumeMusic': '배경음악',
+  'settings.volumeSfx': '효과음',
 } as const;
 
 export type MessageKey = keyof typeof ko;

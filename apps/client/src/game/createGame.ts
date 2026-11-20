@@ -13,6 +13,8 @@ export function createGame(parent: HTMLElement, services: GameServices): Phaser.
     antialias: false,
     disableContextMenu: true,
     banner: false,
+    // Sound is ours (game/audio, Web Audio synthesis); Phaser's sound manager stays off.
+    audio: { noAudio: true },
     scale: {
       mode: Phaser.Scale.RESIZE,
       width: parent.clientWidth || window.innerWidth,

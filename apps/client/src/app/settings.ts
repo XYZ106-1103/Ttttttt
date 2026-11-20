@@ -9,6 +9,10 @@ export interface Settings {
   readonly showFps: boolean;
   readonly language: Language;
   readonly screenShake: boolean;
+  /** Volumes 0..1. */
+  readonly masterVolume: number;
+  readonly musicVolume: number;
+  readonly sfxVolume: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -17,6 +21,9 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   language: 'ko',
   screenShake: true,
+  masterVolume: 0.8,
+  musicVolume: 0.6,
+  sfxVolume: 0.8,
 };
 
 const STORAGE_KEY = 'project-world.settings.v1';

@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { useContext } from 'react';
+import { UiContext } from '../context';
 
 interface ButtonProps {
   readonly children: ReactNode;
@@ -23,11 +25,15 @@ export function Button({
   testId,
   type = 'button',
 }: ButtonProps) {
+  const audio = useContext(UiContext)?.audio;
   return (
     <button
       type={type}
       className={`pw-btn pw-btn--${variant} ${active ? 'is-active' : ''} ${className}`}
-      onClick={onClick}
+      onClick={() => {
+        audio?.play('ui_click');
+        onClick?.();
+      }}
       disabled={disabled}
       title={title}
       data-testid={testId}
