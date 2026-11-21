@@ -1208,6 +1208,8 @@ export class WorldScene extends Phaser.Scene {
       adventurerSprites: this.combatView.adventurers.count,
       online: this.online !== null,
       ready: this.online?.ready ?? true,
+      actionsShown: this.combatView.actionsShown,
+      lastActionAt: this.combatView.lastActionAt,
       peers: this.sim.peers().length,
       peerSprites: this.combatView.peers.count,
       rtt: this.online ? Math.round(this.online.rtt) : 0,

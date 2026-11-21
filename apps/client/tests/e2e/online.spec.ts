@@ -2,6 +2,8 @@ import { type Browser, expect, type Page, test } from '@playwright/test';
 
 interface Snapshot {
   mode: string;
+  actionsShown: number;
+  lastActionAt: number;
   online: boolean;
   ready: boolean;
   x: number;
@@ -60,9 +62,21 @@ const chatTexts = (page: Page): Promise<string[]> =>
   );
 
 /** Register a fresh account, create a character with a look, and enter the online world. */
-async function enterOnline(browser: Browser, name: string, look: number): Promise<Page> {
+async function enterOnline(
+  browser: Browser,
+  name: string,
+  look: number,
+  /** Artificial one-way delay on the game socket (ms), to test prediction under latency. */
+  lagMs = 0,
+): Promise<Page> {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await ctx.newPage();
+  if (lagMs > 0)
+    await page.routeWebSocket(/\/ws/, (ws) => {
+      const server = ws.connectToServer();
+      ws.onMessage((m) => setTimeout(() => server.send(m), lagMs));
+      server.onMessage((m) => setTimeout(() => ws.send(m), lagMs));
+    });
   await page.goto('/');
   await expect(page.getByTestId('title-screen')).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('online-button').click();
@@ -135,6 +149,33 @@ test.describe('PROJECT WORLD — PHASE 6 online play', () => {
     await expect.poll(async () => (await snap(bob)).peers).toBe(0);
     await alice.context().close();
     await bob.context().close();
+  });
+
+  test('own attacks start instantly even with 300 ms of round-trip lag', async ({ browser }) => {
+    const tag = String(Date.now() % 100000);
+    const page = await enterOnline(browser, `La${tag}`, 2, 150);
+    await page.keyboard.press('3'); // training sword
+    await expect.poll(async () => (await snap(page)).selectedSlot).toBe(2);
+    await page.waitForTimeout(800);
+    const s = await snap(page);
+    const before = s.actionsShown;
+    const sx = (s.x + 40 - s.camera.left) * s.zoom;
+    const sy = (s.y - 20 - s.camera.top) * s.zoom;
+    await page.mouse.move(sx, sy);
+    const t0 = await page.evaluate(() => performance.now());
+    await page.mouse.down();
+    await page.mouse.up();
+    await expect
+      .poll(async () => (await snap(page)).actionsShown, { timeout: 5_000 })
+      .toBe(before + 1);
+    const shownAt = (await snap(page)).lastActionAt;
+    // Without prediction the swing would wait for the server (≥ 300 ms round trip).
+    console.log(`own swing shown after ${Math.round(shownAt - t0)} ms (lag 150 ms each way)`);
+    expect(shownAt - t0).toBeLessThan(200);
+    // The server's echo of the same swing is not shown a second time.
+    await page.waitForTimeout(1500);
+    expect((await snap(page)).actionsShown).toBe(before + 1);
+    await page.context().close();
   });
 
   test('players party up, trade face to face and whisper', async ({ browser }) => {

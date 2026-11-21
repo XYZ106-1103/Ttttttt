@@ -210,12 +210,19 @@ export class CombatPresenter {
     if (this.zonesSeen.size > 200) this.zonesSeen.clear();
   }
 
+  /** Own attack/skill animations started (diagnostics: prediction tests). */
+  actionsShown = 0;
+  /** performance.now() of the latest one. */
+  lastActionAt = 0;
+
   private onActor(e: ActorEvent): void {
     const p = this.sim.player;
     const now = this.sim.time;
     const m = p.motor;
     switch (e.type) {
       case 'action': {
+        this.actionsShown++;
+        this.lastActionAt = performance.now();
         const dur = e.action.duration / e.speed;
         this.view.triggerAction(e.action.anim, e.aim, Math.max(0.12, dur * 0.85), now);
         this.scheduleTrails(e.action, e.aim, e.speed, e.skill);

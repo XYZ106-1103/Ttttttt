@@ -15,7 +15,7 @@ import {
   type Character,
   type CharacterView as NetCharacter,
   type CombatEvent,
-  type CombatWorld,
+  CombatWorld,
   type CraftResult,
   createMonster,
   type DropEntity,
@@ -58,7 +58,11 @@ import {
   type Society,
   type SpokenLine,
   type StatKey,
-  stepMotor,
+  FREE_MOVEMENT,
+  type MotorOverride,
+  moveCharacter,
+  resolveSkill,
+  updateCombat,
   TILE_SIZE,
   type TownServices,
   type UseAction,
@@ -83,6 +87,20 @@ const SNAP_DISTANCE = 64;
 const SEND_EVERY = 1;
 /** Unacknowledged inputs kept for replay (2 s); older ones are dropped. */
 const MAX_PENDING = 120;
+/** How long a predicted actor event waits for the server's echo (seconds). */
+const PREDICT_MEMORY = 2;
+
+/** Identity of an actor event for matching a prediction with the server's echo. */
+function actorSig(e: ActorEvent): string {
+  switch (e.type) {
+    case 'action':
+      return `a:${e.action.id}`;
+    case 'castFail':
+      return `f:${e.skill}`;
+    default:
+      return e.type;
+  }
+}
 /** A held-back private update is applied this long after the last command result (ms). */
 const PRIVATE_SETTLE_MS = 150;
 
@@ -215,7 +233,16 @@ export class OnlineSimulation implements ClientSim {
   private lastSnapTime = 0;
   private lastSnapAt = 0;
   private seq = 0;
-  private readonly pending: InputFrame[] = [];
+  /** Inputs the server has not acknowledged yet, with the combat override predicted for each. */
+  private readonly pending: {
+    readonly seq: number;
+    readonly move: MotorInput;
+    readonly ov: MotorOverride;
+  }[] = [];
+  /** Combat prediction runs against this private world, so it never touches replicated state. */
+  private scratchCombat: CombatWorld | null = null;
+  /** Actor events shown ahead of the server (so its echo of the same events is skipped). */
+  private readonly predicted: { readonly sig: string; readonly at: number }[] = [];
   private outbox: InputFrame[] = [];
   private readonly offset = { x: 0, y: 0 };
   private readonly peerRecs = new Map<number, CharacterRec>();
@@ -361,11 +388,12 @@ export class OnlineSimulation implements ClientSim {
     this.applyHeldPrivate();
     if (this.connection === 'online' && this.ready) {
       const frame: InputFrame = { seq: ++this.seq, move: input, use, action };
-      this.pending.push(frame);
-      if (this.pending.length > MAX_PENDING) this.pending.shift();
       this.outbox.push(frame);
       if (this.outbox.length >= SEND_EVERY) this.flushInputs();
-      this.predict(input, dt);
+      const ov = this.predictCombat(input, action, dt);
+      this.pending.push({ seq: frame.seq, move: input, ov });
+      if (this.pending.length > MAX_PENDING) this.pending.shift();
+      this.predict(input, ov, dt);
     } else {
       const p = this.player;
       p.prevX = p.motor.x;
@@ -396,35 +424,56 @@ export class OnlineSimulation implements ClientSim {
     this.core.clock.advance(dt);
   }
 
-  /** Movement prediction for the local player (the same motor the server runs). */
-  private predict(move: MotorInput, dt: number): void {
+  /**
+   * Attack/skill/dodge prediction: the shared combat state machine runs on the local player as
+   * the server will run it, so swings, casts and dodges start the moment the key is pressed.
+   * Hits and projectiles land in a scratch combat world (the server's are authoritative); the
+   * actor events are shown now and the server's echo of them is skipped.
+   */
+  private predictCombat(move: MotorInput, action: ActionIntent, dt: number): MotorOverride {
+    const c = this.player;
+    if (!c.alive) return FREE_MOVEMENT;
+    const scratch = (this.scratchCombat ??= new CombatWorld(this.world, 1));
+    const skill = resolveSkill(c, action, this.time);
+    const ov = updateCombat(c, scratch, this.world, action, skill, move.moveX, this.time, dt);
+    for (const e of c.combat.events) {
+      if (e.type === 'castFail') continue; // the server reports failures
+      this.events.actor.push(e);
+      this.predicted.push({ sig: actorSig(e), at: this.time });
+    }
+    c.combat.events.length = 0;
+    scratch.windows.length = 0;
+    scratch.projectiles.length = 0;
+    scratch.zones.length = 0;
+    scratch.events.length = 0;
+    while (this.predicted.length > 0 && this.time - (this.predicted[0]?.at ?? 0) > PREDICT_MEMORY)
+      this.predicted.shift();
+    return { ...ov };
+  }
+
+  /** Did we already show this actor event of our own (predicted)? Consumes the match. */
+  private wasPredicted(e: ActorEvent): boolean {
+    if (e.type === 'castFail') return false;
+    const sig = actorSig(e);
+    const i = this.predicted.findIndex((p) => p.sig === sig);
+    if (i < 0) return false;
+    this.predicted.splice(0, i + 1);
+    return true;
+  }
+
+  /** Movement prediction for the local player (the same motion step the server runs). */
+  private predict(move: MotorInput, ov: MotorOverride, dt: number): void {
     const c = this.player;
     const m = c.motor;
     c.prevX = m.x;
     c.prevY = m.y;
     if (!c.alive) return;
-    const staggered = this.time < c.staggerUntil;
-    stepMotor(
-      m,
-      {
-        moveX: staggered ? 0 : move.moveX,
-        jumpHeld: move.jumpHeld,
-        jumpPressed: move.jumpPressed && !staggered,
-        down: move.down,
-        speedMul: c.stats.moveSpeed,
-        jumpMul: c.stats.jump,
-        gravityMul: 1,
-      },
-      this.world,
-      this.movement,
-      dt,
-    );
-    c.facing = m.facing;
+    moveCharacter(c, move, ov, this.world, this.movement, this.time, dt);
   }
 
   /** Rewind the local player to the server's state, then replay inputs it has not applied yet. */
   private reconcile(self: SelfState, ack: number): void {
-    while (this.pending.length > 0 && (this.pending[0] as InputFrame).seq <= ack)
+    while (this.pending.length > 0 && (this.pending[0]?.seq ?? Infinity) <= ack)
       this.pending.shift();
     const c = this.player;
     const m = c.motor;
@@ -444,7 +493,7 @@ export class OnlineSimulation implements ClientSim {
     m.dropTimer = self.dropTimer;
     m.airTime = self.airTime;
     c.alive = self.alive;
-    for (const f of this.pending) this.predict(f.move, SIM_DT);
+    for (const f of this.pending) this.predict(f.move, f.ov, SIM_DT);
     const dx = beforeX - m.x;
     const dy = beforeY - m.y;
     if (this.ready) this.maxCorrection = Math.max(this.maxCorrection, Math.hypot(dx, dy));
@@ -871,8 +920,9 @@ export class OnlineSimulation implements ClientSim {
     for (const a of list<{ id: number; event: Record<string, unknown> }>(w.actor)) {
       const ev = this.actorEvent(a.event);
       if (!ev) continue;
-      if (a.id === me) e.actor.push(ev);
-      else if (this.peerRecs.has(a.id)) e.peerActor.push({ id: a.id, event: ev });
+      if (a.id === me) {
+        if (!this.wasPredicted(ev)) e.actor.push(ev);
+      } else if (this.peerRecs.has(a.id)) e.peerActor.push({ id: a.id, event: ev });
       else e.aiActor.push({ id: a.id, event: ev });
     }
     for (const u of list<{ id: number; out: UseOutcome }>(w.uses)) {
@@ -901,7 +951,19 @@ export class OnlineSimulation implements ClientSim {
       const v = m.vit as Vitals;
       this.lastVitals = v;
       try {
+        // The predicted combat state stays ahead of the server's: keep the local charge timer
+        // and never shorten a cooldown or dodge the client has already started.
+        const ac = this.player.combat;
+        const charge = ac.chargeStart;
+        const dodgeCd = ac.dodgeCooldownUntil;
+        const dodgeUntil = ac.dodgeUntil;
+        const cds = new Map(ac.cooldowns);
         applyVitals(this.player, v, this.time);
+        ac.chargeStart = charge;
+        ac.dodgeCooldownUntil = Math.max(ac.dodgeCooldownUntil, dodgeCd);
+        ac.dodgeUntil = Math.max(ac.dodgeUntil, dodgeUntil);
+        for (const [id, until] of cds)
+          if (until > (ac.cooldowns.get(id) ?? 0)) ac.cooldowns.set(id, until);
       } catch (err) {
         console.warn('bad vitals', err);
       }
@@ -951,6 +1013,7 @@ export class OnlineSimulation implements ClientSim {
   private onReconnected(w: Welcome): void {
     this.connection = 'online';
     this.pending.length = 0;
+    this.predicted.length = 0;
     this.outbox = [];
     this.ready = false;
     this.lastSnapTime = w.time;

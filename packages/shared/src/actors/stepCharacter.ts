@@ -3,7 +3,7 @@
  * adventurer's brain both produce a CharacterIntent; this function applies it with the shared
  * movement, combat and sandbox rules — so AI can never do anything a player cannot.
  */
-import type { ActorEvent, CastFail } from '../combat/ActorCombat';
+import type { ActorEvent, CastFail, MotorOverride } from '../combat/ActorCombat';
 import type { CombatWorld } from '../combat/CombatWorld';
 import type { MovementConfig } from '../data/movement';
 import { getSkillDef } from '../data/skills';
@@ -96,48 +96,40 @@ export function heldMode(c: Character): HeldMode {
   return 'sandbox';
 }
 
-export function stepCharacter(
-  env: CharacterEnv,
-  c: Character,
-  intent: CharacterIntent,
-  out: CharacterStepOut,
-): void {
-  const { now, dt, world } = env;
-  const action = intent.action;
-  const input = intent.move;
-  c.prevX = c.motor.x;
-  c.prevY = c.motor.y;
-  if (!c.alive) return;
-
-  // Skill keys auto-swap to a matching weapon from the hotbar.
-  let skill: string | null = null;
-  if (action.skillSlot !== null) {
-    skill = c.skillBar[action.skillSlot] ?? null;
-    const def = skill ? getSkillDef(skill) : undefined;
-    if (def?.weapon && c.usableWeapon()?.type !== def.weapon) {
-      const slot = c.findHotbarWeapon(def.weapon);
-      if (slot >= 0) {
-        c.select(slot);
-        c.refreshStats(now);
-      }
+/** Skill keys resolve through the skill bar and auto-swap to a matching hotbar weapon. */
+export function resolveSkill(c: Character, action: ActionIntent, now: number): string | null {
+  if (action.skillSlot === null) return null;
+  const skill = c.skillBar[action.skillSlot] ?? null;
+  const def = skill ? getSkillDef(skill) : undefined;
+  if (def?.weapon && c.usableWeapon()?.type !== def.weapon) {
+    const slot = c.findHotbarWeapon(def.weapon);
+    if (slot >= 0) {
+      c.select(slot);
+      c.refreshStats(now);
     }
   }
-  if (action.quickHeal) out.quick = 'heal';
-  else if (action.quickMana) out.quick = 'mana';
+  return skill;
+}
 
-  const mode = heldMode(c);
+/** Advance the character's combat state (attacks, skills, dodges) for one tick. */
+export function updateCombat(
+  c: Character,
+  combat: CombatWorld,
+  grid: World,
+  action: ActionIntent,
+  skill: string | null,
+  moveX: number,
+  now: number,
+  dt: number,
+): MotorOverride {
   const weapon = c.usableWeapon();
-  if (mode === 'weapon' && !weapon && action.attackPressed)
-    out.weaponLevel = c.heldWeapon()?.reqLevel ?? 1;
-  if (mode === 'consumable' && action.attackPressed) out.consume = c.selectedSlot;
-
-  const override = c.combat.update(
+  return c.combat.update(
     {
       self: c,
-      combat: env.combat,
-      grid: world,
+      combat,
+      grid,
       weapon,
-      canAttack: mode === 'weapon' && weapon !== null,
+      canAttack: heldMode(c) === 'weapon' && weapon !== null,
       skillLevel: (id) => c.skillLevel(id),
       now,
       dt,
@@ -149,15 +141,34 @@ export function stepCharacter(
       aimY: action.aimY,
       skill,
       dodge: action.dodge,
-      moveX: input.moveX,
+      moveX,
     },
   );
-  for (const e of c.combat.events) {
-    out.actor.push(e);
-    if (e.type === 'castFail') out.castFails.push({ skill: e.skill, reason: e.reason });
-  }
-  c.combat.events.length = 0;
+}
 
+/** No combat influence on movement. */
+export const FREE_MOVEMENT: MotorOverride = {
+  moveMul: 1,
+  gravityMul: 1,
+  vx: null,
+  vy: null,
+  facing: null,
+  noJump: false,
+};
+
+/**
+ * Move the character's body for one tick under its combat override (dashes, rooted attacks)
+ * and stagger. The server and the online client's prediction share this exactly.
+ */
+export function moveCharacter(
+  c: Character,
+  input: MotorInput,
+  override: MotorOverride,
+  world: World,
+  movement: MovementConfig,
+  now: number,
+  dt: number,
+): void {
   const staggered = now < c.staggerUntil;
   const m = c.motor;
   if (override.vx !== null) m.vx = override.vx;
@@ -175,16 +186,50 @@ export function stepCharacter(
       jumpHeld: input.jumpHeld && !override.noJump,
       jumpPressed: input.jumpPressed && !override.noJump && !staggered,
       down: input.down,
-      speedMul: dashing ? Math.abs(override.vx ?? 0) / env.movement.runSpeed : c.stats.moveSpeed,
+      speedMul: dashing ? Math.abs(override.vx ?? 0) / movement.runSpeed : c.stats.moveSpeed,
       jumpMul: c.stats.jump,
       gravityMul: override.gravityMul,
     },
     world,
-    env.movement,
+    movement,
     dt,
   );
   if (override.facing) m.facing = override.facing;
   c.facing = m.facing;
+}
+
+export function stepCharacter(
+  env: CharacterEnv,
+  c: Character,
+  intent: CharacterIntent,
+  out: CharacterStepOut,
+): void {
+  const { now, dt, world } = env;
+  const action = intent.action;
+  const input = intent.move;
+  c.prevX = c.motor.x;
+  c.prevY = c.motor.y;
+  if (!c.alive) return;
+
+  const skill = resolveSkill(c, action, now);
+  if (action.quickHeal) out.quick = 'heal';
+  else if (action.quickMana) out.quick = 'mana';
+
+  const mode = heldMode(c);
+  const weapon = c.usableWeapon();
+  if (mode === 'weapon' && !weapon && action.attackPressed)
+    out.weaponLevel = c.heldWeapon()?.reqLevel ?? 1;
+  if (mode === 'consumable' && action.attackPressed) out.consume = c.selectedSlot;
+
+  const override = updateCombat(c, env.combat, world, action, skill, input.moveX, now, dt);
+  for (const e of c.combat.events) {
+    out.actor.push(e);
+    if (e.type === 'castFail') out.castFails.push({ skill: e.skill, reason: e.reason });
+  }
+  c.combat.events.length = 0;
+
+  moveCharacter(c, input, override, world, env.movement, now, dt);
+  const m = c.motor;
 
   if (intent.use && mode === 'sandbox') {
     const actor = {

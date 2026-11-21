@@ -41,6 +41,8 @@ test.describe('PROJECT WORLD — PHASE 5 living world', () => {
   test('village NPCs: shop, exchange listing, guilds; adventurers talk in chat', async ({
     page,
   }) => {
+    // Waiting for adventurers to start chatting can take up to 90 s on its own.
+    test.setTimeout(240_000);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto('/');
