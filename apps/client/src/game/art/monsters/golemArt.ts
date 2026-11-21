@@ -1,5 +1,5 @@
 /** Corestone Golem boss sprites: a rock body around a glowing ember core. Faces RIGHT. */
-import { hex, mix, shade, withAlpha } from '../color';
+import { type Color, hex, mix, shade, withAlpha } from '../color';
 import { PixelCanvas } from '../PixelCanvas';
 import type { MonsterSheet } from './creatures';
 import { selOut, shadedBlob, softDisc, stroke } from './paint';
@@ -7,18 +7,70 @@ import { selOut, shadedBlob, softDisc, stroke } from './paint';
 const W = 96;
 const H = 96;
 const FOOT = 92;
-const ROCK = hex('#5d6374');
-const ROCK_RAMP = [
-  shade(ROCK, -0.62),
-  shade(ROCK, -0.35),
-  shade(ROCK, -0.1),
-  ROCK,
-  shade(ROCK, 0.25),
-  shade(ROCK, 0.45),
-];
-const MOSS = hex('#7fae5a');
-const EMBER = hex('#ff9a3c');
-const EMBER_HOT = hex('#ffe08a');
+
+/** Colours of a golem-type boss: the Corestone Golem and its biome cousins share one body plan. */
+export interface GolemPalette {
+  readonly rock: Color;
+  /** Tufts on shoulders and head (moss, snow, ash). */
+  readonly moss: Color;
+  /** Core, veins and eyes. */
+  readonly ember: Color;
+  readonly emberHot: Color;
+  readonly rim: Color;
+  readonly rage: Color;
+}
+
+export const CORESTONE_PALETTE: GolemPalette = {
+  rock: hex('#5d6374'),
+  moss: hex('#7fae5a'),
+  ember: hex('#ff9a3c'),
+  emberHot: hex('#ffe08a'),
+  rim: hex('#ffb070'),
+  rage: hex('#ff5a3c'),
+};
+
+export const FROST_GIANT_PALETTE: GolemPalette = {
+  rock: hex('#7d9cc0'),
+  moss: hex('#f4fbff'),
+  ember: hex('#5fd0ff'),
+  emberHot: hex('#e4fbff'),
+  rim: hex('#c8f0ff'),
+  rage: hex('#7ff0ff'),
+};
+
+export const MAGMA_TYRANT_PALETTE: GolemPalette = {
+  rock: hex('#3b3438'),
+  moss: hex('#8a8288'),
+  ember: hex('#ff6a1c'),
+  emberHot: hex('#ffd25a'),
+  rim: hex('#ff8a3c'),
+  rage: hex('#ff3018'),
+};
+
+let ROCK = CORESTONE_PALETTE.rock;
+let ROCK_RAMP: Color[] = [];
+let MOSS = CORESTONE_PALETTE.moss;
+let EMBER = CORESTONE_PALETTE.ember;
+let EMBER_HOT = CORESTONE_PALETTE.emberHot;
+let RIM = CORESTONE_PALETTE.rim;
+let RAGE = CORESTONE_PALETTE.rage;
+
+function applyPalette(p: GolemPalette): void {
+  ROCK = p.rock;
+  ROCK_RAMP = [
+    shade(ROCK, -0.62),
+    shade(ROCK, -0.35),
+    shade(ROCK, -0.1),
+    ROCK,
+    shade(ROCK, 0.25),
+    shade(ROCK, 0.45),
+  ];
+  MOSS = p.moss;
+  EMBER = p.ember;
+  EMBER_HOT = p.emberHot;
+  RIM = p.rim;
+  RAGE = p.rage;
+}
 
 interface GolemPose {
   bodyY?: number;
@@ -45,7 +97,7 @@ function rock(
 ): void {
   shadedBlob(pc, cx, cy, rx, ry, {
     ramp: ROCK_RAMP.map((c) => mix(c, hex('#2a2a36'), fade * 0.6)),
-    rim: hex('#ffb070'),
+    rim: RIM,
     power,
     facet: 5,
     seed: rockSeed++,
@@ -132,7 +184,7 @@ function paintGolem(p: GolemPose): PixelCanvas {
   // Brow ridge.
   for (let x = -6; x <= 7; x++) pc.set(Math.round(hx + x), Math.round(hy - 3), shade(ROCK, -0.45));
   const eye = p.eyes ?? 'open';
-  const eyeColor = eye === 'rage' ? hex('#ff5a3c') : EMBER_HOT;
+  const eyeColor = eye === 'rage' ? RAGE : EMBER_HOT;
   if (eye === 'closed' || crumble > 0.5) {
     for (let x = -3; x <= 5; x++) pc.set(Math.round(hx + x), Math.round(hy + 1), shade(ROCK, -0.7));
   } else {
@@ -161,7 +213,8 @@ function paintGolem(p: GolemPose): PixelCanvas {
   return pc;
 }
 
-export function golemSheet(): MonsterSheet {
+export function golemSheet(palette: GolemPalette = CORESTONE_PALETTE): MonsterSheet {
+  applyPalette(palette);
   const t = new Map<string, { frames: PixelCanvas[]; rate: number; repeat: number }>();
   const a = (key: string, frames: GolemPose[], rate: number, repeat = -1) =>
     t.set(key, { frames: frames.map(paintGolem), rate, repeat });

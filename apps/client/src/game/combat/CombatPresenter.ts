@@ -346,9 +346,11 @@ export class CombatPresenter {
         this.fx.ring(p.motor.x, p.motor.y, 1, 0xffffff);
         break;
       case 'explode':
-        if (e.visual === 'fireball') this.fx.explosion(e.x, e.y, e.radius);
+        if (e.visual === 'fireball' || e.visual === 'magma_ball' || e.visual === 'meteor')
+          this.fx.explosion(e.x, e.y, e.radius);
         else {
-          this.fx.debrisBurst(e.x, e.y, 0x6b7182, 14);
+          const icy = e.visual === 'ice_chunk' || e.visual === 'icicle';
+          this.fx.debrisBurst(e.x, e.y, icy ? 0xc8f0ff : 0x6b7182, 14);
           this.camera.shake(1.4, 0.12);
         }
         break;

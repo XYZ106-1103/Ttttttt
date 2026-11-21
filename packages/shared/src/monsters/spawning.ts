@@ -3,6 +3,7 @@
  * ring around the player, never inside the safe zone, never near torches, capped per area.
  */
 import { TILE_SIZE } from '../constants';
+import { biomeAt, type BiomeId } from '../data/biomes';
 import { MONSTER_DEFS, type LootEntry, type MonsterDef, type SpawnZone } from '../data/monsters';
 import type { Rng } from '../math/rng';
 import { isRegionSolid } from '../physics/TileCollider';
@@ -63,12 +64,16 @@ function pickDef(
   night: boolean,
   rng: Rng,
   defs: readonly MonsterDef[],
+  biome: BiomeId,
+  depth: number,
 ): MonsterDef | null {
   const options = defs.filter(
     (d) =>
       d.spawn &&
       d.spawn.zones.includes(zone) &&
-      (d.spawn.time === 'any' || (d.spawn.time === 'night') === night),
+      (d.spawn.time === 'any' || (d.spawn.time === 'night') === night) &&
+      (!d.spawn.biomes || d.spawn.biomes.includes(biome)) &&
+      depth >= (d.spawn.minDepth ?? -Infinity),
   );
   let total = 0;
   for (const d of options) total += d.spawn?.weight ?? 0;
@@ -96,7 +101,8 @@ export function pickSpawn(
     if (tx >= env.safeFrom && tx <= env.safeTo) continue;
     const zone = zoneAt(world, tx, ty);
     if (!zone) continue;
-    const def = pickDef(zone, env.night, rng, defs);
+    const biome = biomeAt(tx, world.generator.spawnTileX).id;
+    const def = pickDef(zone, env.night, rng, defs, biome, ty - world.surfaceY(tx));
     if (!def) continue;
     let fx = tx * TILE_SIZE + TILE_SIZE / 2;
     let fy: number;

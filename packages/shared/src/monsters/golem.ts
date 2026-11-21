@@ -112,6 +112,8 @@ export function stepGolem(m: Monster, ctx: BrainContext): MotorInput {
   const dx = t ? t.body.x - body.x : 0;
   const dist = Math.abs(dx);
   const attack = { owner: m, power: m.stats.attack, multiplier: 1, tag: 'golem' };
+  const shots = m.def.projectiles;
+  const status = m.def.hitStatus;
 
   switch (b.mode) {
     case 'intro':
@@ -130,7 +132,14 @@ export function stepGolem(m: Monster, ctx: BrainContext): MotorInput {
         ctx.combat.openWindow(
           attack,
           { type: 'box', w: 112, h: 48, forward: 30, up: -14 },
-          { damage: p(m, 'slamDamage', 1.6), knockback: 320, lift: 280, stun: 0.4, hitstop: 0.1 },
+          {
+            damage: p(m, 'slamDamage', 1.6),
+            knockback: 320,
+            lift: 280,
+            stun: 0.4,
+            hitstop: 0.1,
+            status,
+          },
           {
             until: ctx.now + 0.05,
             aim: m.facing > 0 ? 0 : Math.PI,
@@ -141,11 +150,18 @@ export function stepGolem(m: Monster, ctx: BrainContext): MotorInput {
         for (const dir of [-1, 1]) {
           ctx.combat.spawnProjectile(
             attack,
-            'shockwave',
+            shots?.wave ?? 'shockwave',
             fx + dir * 20,
             body.y,
             dir > 0 ? 0 : Math.PI,
-            { damage: p(m, 'waveDamage', 1), knockback: 220, lift: 240, stun: 0.35, hitstop: 0.05 },
+            {
+              damage: p(m, 'waveDamage', 1),
+              knockback: 220,
+              lift: 240,
+              stun: 0.35,
+              hitstop: 0.05,
+              status,
+            },
             enraged ? 300 : 250,
           );
         }
@@ -179,7 +195,7 @@ export function stepGolem(m: Monster, ctx: BrainContext): MotorInput {
           (tx > hx ? -Math.PI / 4 : (-3 * Math.PI) / 4);
         ctx.combat.spawnProjectile(
           attack,
-          'boulder',
+          shots?.boulder ?? 'boulder',
           hx,
           hy,
           ang,
@@ -189,6 +205,7 @@ export function stepGolem(m: Monster, ctx: BrainContext): MotorInput {
             lift: 160,
             stun: 0.3,
             hitstop: 0.05,
+            status,
           },
           speed,
         );
@@ -258,7 +275,7 @@ export function stepGolem(m: Monster, ctx: BrainContext): MotorInput {
           const top = ceilingAbove(ctx, x, b.ay - 40);
           ctx.combat.spawnProjectile(
             attack,
-            'stalactite',
+            shots?.rain ?? 'stalactite',
             x,
             top,
             Math.PI / 2,
@@ -268,6 +285,7 @@ export function stepGolem(m: Monster, ctx: BrainContext): MotorInput {
               lift: 120,
               stun: 0.3,
               hitstop: 0.05,
+              status,
             },
             30 + Math.abs(k) * 25,
           );

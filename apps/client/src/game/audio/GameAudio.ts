@@ -10,7 +10,22 @@ import type { AudioEngine, PlayOptions } from './AudioEngine';
 import type { ThemeId } from './music';
 import type { SfxName } from './sfx';
 
-const STONE = new Set(['stone', 'mossy_stone', 'copper_ore', 'iron_ore', 'stone_bricks']);
+const STONE = new Set([
+  'stone',
+  'mossy_stone',
+  'copper_ore',
+  'iron_ore',
+  'stone_bricks',
+  'sandstone',
+  'basalt',
+  'obsidian',
+  'ice',
+  'silver_ore',
+  'gold_ore',
+  'frostite_ore',
+  'magmite_ore',
+  'crystal_ore',
+]);
 const WOOD = new Set(['wood_platform', 'wood_planks', 'wood_beam']);
 /** A boss this close (pixels) takes over the music. */
 const BOSS_RANGE = 60 * TILE_SIZE;
@@ -149,7 +164,7 @@ export class GameAudio {
           break;
         case 'explode':
           this.play(
-            e.visual === 'fireball' ? 'fireball' : 'explosion',
+            e.visual === 'fireball' || e.visual === 'meteor' ? 'fireball' : 'explosion',
             this.at({ x: e.x, y: e.y }),
           );
           break;

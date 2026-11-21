@@ -5,7 +5,7 @@
 import { MONSTER_DEFS } from '@world/shared';
 import { SpriteAtlasBuilder, type SpriteAtlas } from '../SpriteAtlas';
 import { creatureSheets, type MonsterSheet } from './creatures';
-import { golemSheet } from './golemArt';
+import { FROST_GIANT_PALETTE, golemSheet, MAGMA_TYRANT_PALETTE } from './golemArt';
 
 export type { MonsterSheet };
 
@@ -16,6 +16,8 @@ export function monsterFrameName(id: string, anim: string, i: number): string {
 export function generateMonsterSheets(): Map<string, MonsterSheet> {
   const sheets = creatureSheets();
   sheets.set('corestone_golem', golemSheet());
+  sheets.set('frost_giant', golemSheet(FROST_GIANT_PALETTE));
+  sheets.set('magma_tyrant', golemSheet(MAGMA_TYRANT_PALETTE));
   return sheets;
 }
 

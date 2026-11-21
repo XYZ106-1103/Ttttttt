@@ -159,7 +159,13 @@ function potion(liquid: Color): PixelCanvas {
   return outlined(pc);
 }
 
-function blobIcon(base: Color, spec: Color, shape: 'gel' | 'shell' | 'core'): PixelCanvas {
+function blobIcon(
+  base: Color,
+  spec: Color,
+  shape: 'gel' | 'shell' | 'core',
+  accent = hex('#e47a48'),
+  rockColor = hex('#5d6374'),
+): PixelCanvas {
   const pc = new PixelCanvas(S, S);
   if (shape === 'gel') {
     shadedBlob(pc, 8, 10, 6, 4.5, {
@@ -175,10 +181,10 @@ function blobIcon(base: Color, spec: Color, shape: 'gel' | 'shell' | 'core'): Pi
       spec,
       power: 2.4,
     });
-    for (let x = 3; x <= 13; x += 3) pc.set(x, 4, hex('#e47a48'));
+    for (let x = 3; x <= 13; x += 3) pc.set(x, 4, accent);
     for (let x = 3; x <= 13; x++) pc.set(x, 9, shade(base, -0.55));
   } else {
-    const rock = hex('#5d6374');
+    const rock = rockColor;
     shadedBlob(pc, 8, 9, 6.5, 5.5, {
       ramp: [shade(rock, -0.5), rock, shade(rock, 0.3)],
       power: 3,
@@ -189,6 +195,31 @@ function blobIcon(base: Color, spec: Color, shape: 'gel' | 'shell' | 'core'): Pi
       const w = 2 - Math.floor(Math.abs(dy) * 0.6);
       for (let dx = -w; dx <= w; dx++) pc.set(8 + dx, 8 + dy, dx < 0 && dy < 0 ? spec : base);
     }
+  }
+  return outlined(pc);
+}
+
+function feather(): PixelCanvas {
+  const pc = new PixelCanvas(S, S);
+  for (let i = 0; i < 11; i++) {
+    const x = 3 + i;
+    const y = 13 - i;
+    pc.set(x, y, hex('#f0e0c0'));
+    const w = Math.min(i, 10 - i) * 0.35 + 1;
+    for (let k = 1; k <= w; k++) {
+      pc.set(x - k, y - k + 1, hex('#a07850'));
+      pc.set(x + k - 1, y + k, hex('#6e5238'));
+    }
+  }
+  return outlined(pc);
+}
+
+function fang(tip: Color, root: Color): PixelCanvas {
+  const pc = new PixelCanvas(S, S);
+  for (let y = 2; y <= 13; y++) {
+    const w = Math.max(0, 3 - Math.floor((y - 2) / 4));
+    const bend = Math.round(((y - 2) / 11) ** 2 * 3);
+    for (let x = -w; x <= w; x++) pc.set(6 + x + bend, y, mix(root, tip, (y - 2) / 11));
   }
   return outlined(pc);
 }
@@ -220,21 +251,49 @@ function ember(): PixelCanvas {
   return outlined(pc);
 }
 
+/** Rings: band metal and gem colours. */
+const RINGS: Record<string, [string, string, string, string]> = {
+  corestone_ring: ['#c3cbda', '#8790a6', '#ff9a3c', '#ffe08a'],
+  gold_ring: ['#f2c84b', '#c8901c', '#e0444a', '#ffc0c0'],
+  magma_ring: ['#4a3a7a', '#281c44', '#ff6a1c', '#ffd25a'],
+};
+
+/** Pendants on a cord: gem colours. */
+const PENDANTS: Record<string, [string, string, string]> = {
+  frost_amulet: ['#9fdcff', '#3a9ad4', '#ffffff'],
+  crystal_pendant: ['#c58cff', '#8a4ad4', '#f4e0ff'],
+};
+
 function accessory(id: string): PixelCanvas {
   const pc = new PixelCanvas(S, S);
   const cord = hex('#8c6a4a');
-  if (id === 'corestone_ring') {
+  const ring = RINGS[id];
+  if (ring) {
+    const [hi, lo, gem, spark] = ring.map((c) => hex(c)) as [Color, Color, Color, Color];
     for (let a = 0; a < 24; a++) {
       const t = (a / 24) * Math.PI * 2;
       pc.set(
         Math.round(8 + Math.cos(t) * 4.5),
         Math.round(10 + Math.sin(t) * 3.5),
-        a < 12 ? hex('#c3cbda') : hex('#8790a6'),
+        a < 12 ? hi : lo,
       );
     }
-    softDisc(pc, 8, 5, 4, hex('#ff9a3c'), 160);
-    pc.fillCircle(8, 5, 2.2, hex('#ff9a3c'));
-    pc.set(7, 4, hex('#ffe08a'));
+    softDisc(pc, 8, 5, 4, gem, 160);
+    pc.fillCircle(8, 5, 2.2, gem);
+    pc.set(7, 4, spark);
+    return outlined(pc);
+  }
+  const pendant = PENDANTS[id];
+  if (pendant) {
+    const [gem, dark, spark] = pendant.map((c) => hex(c)) as [Color, Color, Color];
+    for (let x = 2; x <= 13; x++)
+      pc.set(x, Math.round(2 + Math.pow((x - 7.5) / 5.5, 2) * -2 + 2), hex('#c3cbda'));
+    softDisc(pc, 8, 10, 5, gem, 140);
+    for (let dy = -4; dy <= 4; dy++) {
+      const w = 3 - Math.floor(Math.abs(dy) * 0.7);
+      for (let dx = -w; dx <= w; dx++) pc.set(8 + dx, 10 + dy, dx < 0 ? gem : dark);
+    }
+    pc.set(7, 8, spark);
     return outlined(pc);
   }
   // Pendants on a cord.
@@ -262,6 +321,13 @@ function accessory(id: string): PixelCanvas {
   return outlined(pc);
 }
 
+const STAFF_GEMS: Record<string, string> = {
+  silver_staff: '#7fe0ff',
+  frostite_staff: '#e4fbff',
+  magmite_staff: '#ffd25a',
+  crystal_staff: '#ff8af0',
+};
+
 /** Icon for a combat item, or null when the item is not a combat item. */
 export function gearIcon(def: ItemDef): PixelCanvas | null {
   const id = def.id;
@@ -274,7 +340,9 @@ export function gearIcon(def: ItemDef): PixelCanvas | null {
         return sword(m, true);
       case 'bow':
         return bow(id.startsWith('oak') ? (MATERIAL.wood ?? []) : m);
-      case 'staff':
+      case 'staff': {
+        const gem = STAFF_GEMS[id];
+        if (gem) return staff(hex(gem), m);
         return staff(
           id === 'ember_staff'
             ? hex('#5fa8ff')
@@ -287,6 +355,7 @@ export function gearIcon(def: ItemDef): PixelCanvas | null {
               ? (MATERIAL.copper ?? [])
               : (MATERIAL.iron ?? []),
         );
+      }
     }
   }
   if (def.equip) {
@@ -319,6 +388,28 @@ export function gearIcon(def: ItemDef): PixelCanvas | null {
       return wing();
     case 'wisp_ember':
       return ember();
+    case 'crab_shell':
+      return blobIcon(hex('#e0603c'), hex('#fff0e0'), 'shell', hex('#ffb08a'));
+    case 'ash_carapace':
+      return blobIcon(hex('#3d3a40'), hex('#ffb05a'), 'shell', hex('#ff7a2c'));
+    case 'tyrant_scale':
+      return blobIcon(hex('#2a2024'), hex('#ffd25a'), 'shell', hex('#ff3018'));
+    case 'ice_gel':
+      return blobIcon(hex('#9fdcff'), hex('#ffffff'), 'gel');
+    case 'magma_core':
+      return blobIcon(hex('#ff6a1c'), hex('#ffd25a'), 'core', undefined, hex('#3b3438'));
+    case 'frost_core':
+      return blobIcon(hex('#5fd0ff'), hex('#e4fbff'), 'core', undefined, hex('#7d9cc0'));
+    case 'frost_sigil':
+      return blobIcon(hex('#7fe0ff'), hex('#ffffff'), 'core', undefined, hex('#c8dcf0'));
+    case 'ember_sigil':
+      return blobIcon(hex('#ff3018'), hex('#ffd25a'), 'core', undefined, hex('#281c44'));
+    case 'harpy_feather':
+      return feather();
+    case 'frost_fang':
+      return fang(hex('#e8f4ff'), hex('#9fbcd8'));
+    case 'imp_horn':
+      return fang(hex('#e8d8b0'), hex('#8a2a1e'));
   }
   return null;
 }

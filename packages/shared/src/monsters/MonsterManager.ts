@@ -156,7 +156,14 @@ export class MonsterManager {
           this.combat.applyHit(
             { owner: m, power: m.stats.attack, multiplier: 1, tag: 'contact' },
             target,
-            { damage: m.contact, knockback: 210, lift: 180, stun: 0.3, hitstop: 0.04 },
+            {
+              damage: m.contact,
+              knockback: 210,
+              lift: 180,
+              stun: 0.3,
+              hitstop: 0.04,
+              status: m.def.hitStatus,
+            },
             Math.sign(target.body.x - m.motor.x) || m.facing,
             'contact',
             now,

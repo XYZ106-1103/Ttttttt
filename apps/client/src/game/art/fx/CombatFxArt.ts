@@ -102,52 +102,98 @@ function pebble(): PixelCanvas {
   return pc;
 }
 
-function boulder(): PixelCanvas {
+function boulder(
+  r = hex('#5d6374'),
+  rim = hex('#ffb070'),
+  crack = hex('#ff9a3c'),
+  cracks = 1,
+): PixelCanvas {
   const pc = new PixelCanvas(20, 20);
-  const r = hex('#5d6374');
   shadedBlob(pc, 10, 10, 8, 7.5, {
     ramp: [shade(r, -0.6), shade(r, -0.3), r, shade(r, 0.3), shade(r, 0.5)],
     power: 3,
     facet: 4,
-    rim: hex('#ffb070'),
+    rim,
   });
-  pc.set(8, 11, hex('#ff9a3c'));
-  pc.set(9, 12, hex('#ff9a3c'));
+  pc.set(8, 11, crack);
+  pc.set(9, 12, crack);
+  if (cracks > 1) {
+    for (const [x, y] of [
+      [12, 7],
+      [13, 8],
+      [11, 13],
+      [6, 8],
+      [10, 9],
+    ] as const)
+      pc.set(x, y, crack);
+  }
   selOut(pc, 0.55);
   return pc;
 }
 
-function stalactite(): PixelCanvas {
+function stalactite(r = hex('#6b7182'), tip: Color | null = null): PixelCanvas {
   const pc = new PixelCanvas(10, 20);
-  const r = hex('#6b7182');
   for (let y = 0; y < 19; y++) {
     const w = Math.max(0, 4 - Math.floor(y / 4.5));
     for (let x = -w; x <= w; x++) {
       const c = x < 0 ? shade(r, 0.25) : x > 0 ? shade(r, -0.3) : r;
-      pc.set(5 + x, y, c);
+      pc.set(5 + x, y, tip && y > 13 ? mix(c, tip, (y - 13) / 6) : c);
     }
   }
   selOut(pc, 0.55);
   return pc;
 }
 
-function shockwave(f: number): PixelCanvas {
+/** A falling burning rock with a flame trail above it. */
+function meteor(): PixelCanvas {
+  const pc = new PixelCanvas(14, 22);
+  for (let i = 0; i < 6; i++)
+    pc.fillCircle(
+      7 + Math.sin(i * 1.7) * 0.8,
+      4 + i * 1.6,
+      1.2 + i * 0.45,
+      withAlpha(mix(hex('#ffe08a'), hex('#ff5a2a'), i / 6), 120 + i * 20),
+    );
+  shadedBlob(pc, 7, 16, 4.6, 4.4, {
+    ramp: [hex('#2a2024'), hex('#4a3a3c'), hex('#6a5450')],
+    rim: hex('#ff8a3c'),
+    facet: 3,
+  });
+  pc.set(6, 16, hex('#ffb05a'));
+  pc.set(8, 17, hex('#ff7a2c'));
+  selOut(pc, 0.5);
+  return pc;
+}
+
+/** Homing frost shard: a spinning crystal in a pale halo. */
+function iceShard(phase: number): PixelCanvas {
+  const pc = new PixelCanvas(12, 12);
+  softDisc(pc, 6, 6, 6, hex('#9fdcff'), 150);
+  const a = phase * Math.PI;
+  for (let i = -4; i <= 4; i++) {
+    const w = Math.max(0, 1.6 - Math.abs(i) * 0.35);
+    const x = 6 + Math.cos(a) * i;
+    const y = 6 + Math.sin(a) * i;
+    pc.fillCircle(x - 0.5, y - 0.5, w, i < 0 ? hex('#c8f0ff') : hex('#7fc8ff'));
+  }
+  pc.set(6, 5, WHITE);
+  return pc;
+}
+
+function shockwave(
+  f: number,
+  c0 = hex('#ff9a3c'),
+  c1 = hex('#ffe08a'),
+  speck = hex('#8a8f9c'),
+): PixelCanvas {
   const pc = new PixelCanvas(20, 18);
   const h = 6 + f * 4;
   for (let i = 0; i < 9; i++) {
     const x = 3 + i * 1.6;
     const top = 17 - h * Math.sin((i / 8) * Math.PI);
-    stroke(
-      pc,
-      x,
-      17,
-      x,
-      top,
-      0.7,
-      withAlpha(mix(hex('#ff9a3c'), hex('#ffe08a'), i / 9), 220 - f * 40),
-    );
+    stroke(pc, x, 17, x, top, 0.7, withAlpha(mix(c0, c1, i / 9), 220 - f * 40));
   }
-  for (let i = 0; i < 6; i++) pc.set(2 + i * 3, 17 - ((i * 7 + f * 3) % 5) - 6, hex('#8a8f9c'));
+  for (let i = 0; i < 6; i++) pc.set(2 + i * 3, 17 - ((i * 7 + f * 3) % 5) - 6, speck);
   return pc;
 }
 
@@ -415,10 +461,16 @@ export function generateCombatFxAtlas(): SpriteAtlas {
   b.add('kunai', kunai());
   b.add('boulder', boulder());
   b.add('stalactite', stalactite());
+  b.add('ice_chunk', boulder(hex('#8fc0e8'), hex('#e4fbff'), hex('#ffffff')));
+  b.add('icicle', stalactite(hex('#a8dcff'), hex('#ffffff')));
+  b.add('magma_ball', boulder(hex('#3b3438'), hex('#ff8a3c'), hex('#ffb05a'), 3));
+  b.add('meteor', meteor());
   for (let i = 0; i < 3; i++) {
     b.add(`magic_bolt_${i}`, orb(10, hex('#e6f2ff'), hex('#6f9cff'), i / 3));
     b.add(`arcane_bolt_${i}`, orb(14, hex('#f2e6ff'), hex('#a77cf0'), i / 3, true));
     b.add(`shockwave_${i}`, shockwave(i / 2));
+    b.add(`frost_wave_${i}`, shockwave(i / 2, hex('#7fc8ff'), hex('#f2fbff'), hex('#ffffff')));
+    b.add(`lava_wave_${i}`, shockwave(i / 2, hex('#ff4a1c'), hex('#ffd25a'), hex('#3b3438')));
     b.add(`slash_${i}`, slash(48, i / 3, 7, 2.4));
     b.add(`slam_${i}`, slash(60, i / 3, 10, 2.8));
     b.add(`spin_${i}`, slash(76, i / 3, 6, Math.PI * 2 - 0.3));
@@ -426,6 +478,7 @@ export function generateCombatFxAtlas(): SpriteAtlas {
   for (let i = 0; i < 4; i++) {
     b.add(`fireball_${i}`, fireball(i / 4));
     b.add(`wisp_fire_${i}`, wispFire(i / 4));
+    b.add(`ice_shard_${i}`, iceShard(i / 4));
     b.add(`hit_${i}`, burst(20, i / 4, 8, hex('#ffe08a')));
     b.add(`crit_${i}`, burst(30, i / 4, 12, hex('#ff7a3a')));
     b.add(`ring_${i}`, ring(32, i / 4, WHITE));

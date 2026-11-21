@@ -21,6 +21,13 @@ const VISUALS: Record<string, Visual> = {
   fireball: { anim: 'fireball', rotate: 'velocity', glow: true },
   wisp_fire: { anim: 'wisp_fire', rotate: 'none', glow: true },
   shockwave: { anim: 'shockwave', rotate: 'flip', glow: true },
+  ice_shard: { anim: 'ice_shard', rotate: 'none', glow: true },
+  ice_chunk: { frame: 'ice_chunk', rotate: 'spin', glow: false },
+  icicle: { frame: 'icicle', rotate: 'none', glow: false },
+  frost_wave: { anim: 'frost_wave', rotate: 'flip', glow: true },
+  magma_ball: { frame: 'magma_ball', rotate: 'spin', glow: true },
+  meteor: { frame: 'meteor', rotate: 'none', glow: true },
+  lava_wave: { anim: 'lava_wave', rotate: 'flip', glow: true },
 };
 
 interface ProjectileSprite {

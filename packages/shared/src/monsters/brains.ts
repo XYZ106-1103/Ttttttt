@@ -407,12 +407,12 @@ function caster(m: Monster, ctx: BrainContext): void {
       b.timer = param(m, 'castEvery', 2.6) * ctx.rng.range(0.8, 1.2);
       const ang = Math.atan2(t.dy, t.dx);
       ctx.combat.spawnProjectile(
-        { owner: m, power: m.stats.attack, multiplier: 1, tag: 'wisp_fire' },
-        'wisp_fire',
+        { owner: m, power: m.stats.attack, multiplier: 1, tag: m.def.shot ?? 'wisp_fire' },
+        m.def.shot ?? 'wisp_fire',
         cx + Math.cos(ang) * 8,
         cy + Math.sin(ang) * 8,
         ang,
-        { damage: 1, knockback: 160, lift: 130, stun: 0.3, hitstop: 0.03 },
+        { damage: 1, knockback: 160, lift: 130, stun: 0.3, hitstop: 0.03, status: m.def.hitStatus },
       );
       setAnim(m, 'attack');
     }

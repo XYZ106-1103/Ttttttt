@@ -4,6 +4,7 @@
  */
 import { type Color, hex, mix, shade, withAlpha } from '../color';
 import { PixelCanvas } from '../PixelCanvas';
+import { beastSheets } from './beasts';
 import { flipY, selOut, shadedBlob, softDisc, stroke } from './paint';
 
 export interface MonsterSheet {
@@ -55,7 +56,7 @@ function paintSlime(pal: SlimePalette, p: SlimePose): PixelCanvas {
   const a = Math.round(225 * (1 - (p.fade ?? 0)));
   shadedBlob(pc, cx, cy, rx, ry, {
     ramp,
-    spec: hex('#f4fff8'),
+    spec: mix(pal.core, WHITE, 0.6),
     clipBottom: base,
     alphaValue: a,
     rim: shade(pal.body, 0.5),
@@ -114,7 +115,7 @@ function paintSlime(pal: SlimePalette, p: SlimePose): PixelCanvas {
   return pc;
 }
 
-function slimeSheet(pal: SlimePalette): MonsterSheet {
+function slimeSheet(pal: SlimePalette, emissive = false): MonsterSheet {
   const t: AnimTable = new Map();
   const P = (p: SlimePose) => paintSlime(pal, p);
   anim(
@@ -157,7 +158,7 @@ function slimeSheet(pal: SlimePalette): MonsterSheet {
     9,
     0,
   );
-  return { width: 32, height: 26, footX: 16, footY: 24, anims: t };
+  return { width: 32, height: 26, footX: 16, footY: 24, anims: t, emissive };
 }
 
 // --- Thornback beetle ---------------------------------------------------------------------------
@@ -171,9 +172,27 @@ interface BeetlePose {
   readonly speedLines?: boolean;
 }
 
-const SHELL = hex('#3f6b4f');
-const THORN = hex('#e47a48');
-const BELLY = hex('#2b2a36');
+interface BeetlePalette {
+  readonly shell: Color;
+  readonly thorn: Color;
+  readonly belly: Color;
+  readonly speck: Color;
+  readonly rim: Color;
+}
+
+const THORNBACK: BeetlePalette = {
+  shell: hex('#3f6b4f'),
+  thorn: hex('#e47a48'),
+  belly: hex('#2b2a36'),
+  speck: hex('#9ccc6c'),
+  rim: hex('#8fd0a0'),
+};
+
+let SHELL = THORNBACK.shell;
+let THORN = THORNBACK.thorn;
+let BELLY = THORNBACK.belly;
+let SPECK = THORNBACK.speck;
+let SHELL_RIM = THORNBACK.rim;
 
 function paintBeetle(p: BeetlePose): PixelCanvas {
   const W = 40;
@@ -202,10 +221,10 @@ function paintBeetle(p: BeetlePose): PixelCanvas {
   shadedBlob(pc, cx, cy + 3, 11.5, 3.5, { ramp: [shade(BELLY, -0.4), BELLY, shade(BELLY, 0.2)] });
   shadedBlob(pc, cx, cy, 12.5, 7.5, {
     ramp: [shade(SHELL, -0.6), shade(SHELL, -0.3), SHELL, shade(SHELL, 0.25), shade(SHELL, 0.5)],
-    spec: hex('#d9f2c4'),
+    spec: mix(SPECK, WHITE, 0.6),
     power: 2.4,
     clipBottom: cy + 3,
-    rim: hex('#8fd0a0'),
+    rim: SHELL_RIM,
   });
   // Shell seam and moss specks.
   for (let x = Math.round(cx - 9); x <= cx + 9; x++)
@@ -216,7 +235,7 @@ function paintBeetle(p: BeetlePose): PixelCanvas {
     [3, -4],
     [7, -2],
   ] as const) {
-    pc.set(Math.round(cx + dx), Math.round(cy + dy), hex('#9ccc6c'));
+    pc.set(Math.round(cx + dx), Math.round(cy + dy), SPECK);
   }
   // Thorns along the ridge.
   for (let i = 0; i < 5; i++) {
@@ -253,7 +272,12 @@ function paintBeetle(p: BeetlePose): PixelCanvas {
   return pc;
 }
 
-function beetleSheet(): MonsterSheet {
+function beetleSheet(pal: BeetlePalette = THORNBACK): MonsterSheet {
+  SHELL = pal.shell;
+  THORN = pal.thorn;
+  BELLY = pal.belly;
+  SPECK = pal.speck;
+  SHELL_RIM = pal.rim;
   const t: AnimTable = new Map();
   anim(t, 'idle', [paintBeetle({ leg: 0 }), paintBeetle({ leg: 0, lift: 0.6 })], 3);
   anim(
@@ -292,8 +316,22 @@ function beetleSheet(): MonsterSheet {
 
 // --- Cave bat -----------------------------------------------------------------------------------
 
-const FUR = hex('#5d4b72');
-const MEMBRANE = hex('#3a2c4c');
+interface BatPalette {
+  readonly fur: Color;
+  readonly membrane: Color;
+  readonly eye: Color;
+  /** Crystal spikes on the back. */
+  readonly crystals?: Color;
+  /** Bird-like: a beak and feathered wing tips (harpies). */
+  readonly beak?: Color;
+  /** Wing length multiplier. */
+  readonly span?: number;
+}
+
+const CAVE_BAT: BatPalette = { fur: hex('#5d4b72'), membrane: hex('#3a2c4c'), eye: hex('#ffb347') };
+let BAT = CAVE_BAT;
+let FUR = CAVE_BAT.fur;
+let MEMBRANE = CAVE_BAT.membrane;
 
 function paintBat(wing: number, folded = false, eyes: 'open' | 'closed' = 'open'): PixelCanvas {
   const W = 34;
@@ -308,7 +346,7 @@ function paintBat(wing: number, folded = false, eyes: 'open' | 'closed' = 'open'
     const tips: [number, number][] = [];
     for (let f = 0; f < 3; f++) {
       const a = ang + f * 0.45;
-      const len = (12 - f * 2) * spread;
+      const len = (12 - f * 2) * spread * (BAT.span ?? 1);
       tips.push([cx + side * (3 + Math.cos(a) * len), cy + Math.sin(a) * len * 0.9]);
     }
     const sx = cx + side * 3;
@@ -326,6 +364,13 @@ function paintBat(wing: number, folded = false, eyes: 'open' | 'closed' = 'open'
       }
     }
     for (const [tx, ty] of tips) stroke(pc, sx, sy, tx, ty, 0.4, shade(FUR, -0.25));
+    if (BAT.beak) {
+      // Feathered tips.
+      for (const [tx, ty] of tips) {
+        pc.set(Math.round(tx + side), Math.round(ty), shade(MEMBRANE, 0.35));
+        pc.set(Math.round(tx + side), Math.round(ty + 1), shade(MEMBRANE, 0.2));
+      }
+    }
   }
   // Body, ears, face.
   shadedBlob(pc, cx, cy + 1, 4.5, 5, {
@@ -337,14 +382,30 @@ function paintBat(wing: number, folded = false, eyes: 'open' | 'closed' = 'open'
   pc.set(cx + 2, cy - 5, FUR);
   pc.set(cx + 3, cy - 6, shade(FUR, 0.2));
   if (eyes === 'open') {
-    pc.set(cx - 1, cy - 1, hex('#ffb347'));
-    pc.set(cx + 2, cy - 1, hex('#ffb347'));
+    pc.set(cx - 1, cy - 1, BAT.eye);
+    pc.set(cx + 2, cy - 1, BAT.eye);
   } else {
     pc.set(cx - 1, cy - 1, EYE);
     pc.set(cx + 2, cy - 1, EYE);
   }
-  pc.set(cx, cy + 2, WHITE);
-  pc.set(cx + 1, cy + 2, WHITE);
+  if (BAT.beak) {
+    pc.set(cx + 3, cy + 1, BAT.beak);
+    pc.set(cx + 4, cy + 1, BAT.beak);
+    pc.set(cx + 3, cy + 2, shade(BAT.beak, -0.3));
+  } else {
+    pc.set(cx, cy + 2, WHITE);
+    pc.set(cx + 1, cy + 2, WHITE);
+  }
+  if (BAT.crystals) {
+    for (const [dx, h] of [
+      [-2, 3],
+      [0, 4],
+      [2, 3],
+    ] as const) {
+      for (let i = 0; i < h; i++)
+        pc.set(cx + dx, cy - 4 - i, i === h - 1 ? WHITE : shade(BAT.crystals, i * 0.12));
+    }
+  }
   // Feet.
   pc.set(cx - 1, cy + 6, shade(FUR, -0.3));
   pc.set(cx + 1, cy + 6, shade(FUR, -0.3));
@@ -352,7 +413,10 @@ function paintBat(wing: number, folded = false, eyes: 'open' | 'closed' = 'open'
   return pc;
 }
 
-function batSheet(): MonsterSheet {
+function batSheet(pal: BatPalette = CAVE_BAT): MonsterSheet {
+  BAT = pal;
+  FUR = pal.fur;
+  MEMBRANE = pal.membrane;
   const t: AnimTable = new Map();
   anim(t, 'fly', [paintBat(0), paintBat(0.45), paintBat(1), paintBat(0.45)], 14);
   anim(t, 'idle', [paintBat(0), paintBat(0.45), paintBat(1), paintBat(0.45)], 10);
@@ -361,10 +425,27 @@ function batSheet(): MonsterSheet {
   anim(t, 'stunned', [paintBat(1, true, 'closed')], 1, 0);
   const limp = paintBat(1.2, true, 'closed');
   anim(t, 'dead', [flipY(limp, new PixelCanvas(limp.width, limp.height))], 1, 0);
-  return { width: 34, height: 26, footX: 17, footY: 19, anims: t };
+  return { width: 34, height: 26, footX: 17, footY: 19, anims: t, emissive: !!pal.crystals };
 }
 
 // --- Wisp (dokkaebi-bul) ------------------------------------------------------------------------
+
+interface WispPalette {
+  readonly outer: Color;
+  readonly mid: Color;
+  readonly inner: Color;
+  readonly glow: Color;
+  readonly eye: Color;
+}
+
+const BLUE_WISP: WispPalette = {
+  outer: hex('#2f58ff'),
+  mid: hex('#5fa8ff'),
+  inner: hex('#c8ecff'),
+  glow: hex('#4a7dff'),
+  eye: hex('#0b1240'),
+};
+let WISP = BLUE_WISP;
 
 function paintWisp(
   phase: number,
@@ -378,10 +459,8 @@ function paintWisp(
   const cx = 14;
   const cy = 22;
   const k = 1 - fade;
-  const outer = hex('#2f58ff');
-  const mid = hex('#5fa8ff');
-  const inner = hex('#c8ecff');
-  softDisc(pc, cx, cy - 2, 13 * k + power * 2, hex('#4a7dff'), Math.round(90 * k));
+  const { outer, mid, inner } = WISP;
+  softDisc(pc, cx, cy - 2, 13 * k + power * 2, WISP.glow, Math.round(90 * k));
   // Flame: stacked ellipses rising, swaying with the phase.
   const layers = 7;
   for (let i = 0; i < layers; i++) {
@@ -409,17 +488,18 @@ function paintWisp(
   if (k > 0.5) {
     const ey = cy - 2;
     if (eyes === 'open') {
-      pc.fillRect(cx - 3, ey - 1, 2, 3, withAlpha(hex('#0b1240'), 230));
-      pc.fillRect(cx + 2, ey - 1, 2, 3, withAlpha(hex('#0b1240'), 230));
+      pc.fillRect(cx - 3, ey - 1, 2, 3, withAlpha(WISP.eye, 230));
+      pc.fillRect(cx + 2, ey - 1, 2, 3, withAlpha(WISP.eye, 230));
     } else {
-      pc.fillRect(cx - 3, ey, 2, 1, withAlpha(hex('#0b1240'), 230));
-      pc.fillRect(cx + 2, ey, 2, 1, withAlpha(hex('#0b1240'), 230));
+      pc.fillRect(cx - 3, ey, 2, 1, withAlpha(WISP.eye, 230));
+      pc.fillRect(cx + 2, ey, 2, 1, withAlpha(WISP.eye, 230));
     }
   }
   return pc;
 }
 
-function wispSheet(): MonsterSheet {
+function wispSheet(pal: WispPalette = BLUE_WISP): MonsterSheet {
+  WISP = pal;
   const t: AnimTable = new Map();
   anim(
     t,
@@ -462,5 +542,53 @@ export function creatureSheets(): Map<string, MonsterSheet> {
     ['thornback', beetleSheet()],
     ['cave_bat', batSheet()],
     ['wisp', wispSheet()],
+    [
+      'frost_slime',
+      slimeSheet({ body: hex('#9fdcff'), core: hex('#f2fbff'), spots: hex('#ffffff') }),
+    ],
+    [
+      'magma_slime',
+      slimeSheet({ body: hex('#ff6a28'), core: hex('#ffe08a'), spots: hex('#5a1a10') }, true),
+    ],
+    [
+      'ash_crawler',
+      beetleSheet({
+        shell: hex('#3d3a40'),
+        thorn: hex('#ff7a2c'),
+        belly: hex('#1f1a1e'),
+        speck: hex('#ffb05a'),
+        rim: hex('#ff8a4c'),
+      }),
+    ],
+    [
+      'crag_harpy',
+      batSheet({
+        fur: hex('#a07850'),
+        membrane: hex('#6e5238'),
+        eye: hex('#ffe066'),
+        beak: hex('#f0c060'),
+        span: 1.12,
+      }),
+    ],
+    [
+      'crystal_bat',
+      batSheet({
+        fur: hex('#5a4a8a'),
+        membrane: hex('#3c3070'),
+        eye: hex('#9ff8ff'),
+        crystals: hex('#b48cff'),
+      }),
+    ],
+    [
+      'ice_wisp',
+      wispSheet({
+        outer: hex('#7fc8ff'),
+        mid: hex('#c4ecff'),
+        inner: hex('#ffffff'),
+        glow: hex('#9fdcff'),
+        eye: hex('#1a3a6a'),
+      }),
+    ],
+    ...beastSheets(),
   ]);
 }

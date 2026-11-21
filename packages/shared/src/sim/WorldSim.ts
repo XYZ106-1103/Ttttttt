@@ -10,6 +10,7 @@ import { expForKill } from '../combat/damage';
 import type { LearnFail } from '../combat/progression';
 import { CHUNK_SIZE, TILE_SIZE } from '../constants';
 import { JOB_STARTER_WEAPONS } from '../data/items';
+import { biomeAt } from '../data/biomes';
 import { getMonsterDef } from '../data/monsters';
 import { DEFAULT_MOVEMENT, type MovementConfig } from '../data/movement';
 import { MARKET_X, MERCHANT_STALLS } from '../data/npcs';
@@ -73,7 +74,7 @@ export interface PlayerPickup {
   readonly count: number;
 }
 
-export type ConsumeFail = 'cooldown' | 'too_shallow' | 'boss_active' | 'no_room';
+export type ConsumeFail = 'cooldown' | 'too_shallow' | 'wrong_biome' | 'boss_active' | 'no_room';
 
 export type SimNotice =
   | { readonly kind: 'castFail'; readonly skill: string; readonly reason: CastFail }
@@ -734,8 +735,12 @@ export class WorldSim {
       const m = p.motor;
       const tx = Math.floor(m.x / TILE_SIZE);
       const depth = Math.floor((m.y - 1) / TILE_SIZE) - this.world.surfaceY(tx);
-      if (depth < (c.minDepth ?? 0)) {
+      if (c.minDepth !== undefined && depth < c.minDepth) {
         slot.events.notices.push({ kind: 'consumeFail', reason: 'too_shallow' });
+        return false;
+      }
+      if (c.biomes && !c.biomes.includes(biomeAt(tx, this.world.generator.spawnTileX).id)) {
+        slot.events.notices.push({ kind: 'consumeFail', reason: 'wrong_biome' });
         return false;
       }
       if (this.monsters.bossActive) {
