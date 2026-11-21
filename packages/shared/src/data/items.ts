@@ -345,6 +345,7 @@ const defs: ItemDef[] = [
   material('bat_wing', 8, 'uncommon'),
   material('wisp_ember', 14, 'uncommon'),
   material('corestone', 60, 'epic', 99),
+  material('enhance_stone', 15, 'uncommon'),
   material('crab_shell', 9),
   material('ice_gel', 12, 'uncommon'),
   material('frost_fang', 16, 'uncommon'),

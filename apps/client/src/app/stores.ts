@@ -26,6 +26,30 @@ export interface InventoryState {
   readonly version: number;
 }
 
+/** One objective line of a quest, ready to display. */
+export interface QuestObjectiveView {
+  readonly kind: string;
+  /** Monster, item or biome the objective is about. */
+  readonly target: string;
+  readonly have: number;
+  readonly need: number;
+}
+
+export interface QuestView {
+  readonly id: string;
+  readonly kind: 'story' | 'bounty';
+  readonly objectives: readonly QuestObjectiveView[];
+  readonly complete: boolean;
+}
+
+export interface QuestsState {
+  readonly active: readonly QuestView[];
+  /** Quests the guide offers right now. */
+  readonly available: readonly QuestView[];
+  readonly doneStory: number;
+  readonly nearGiver: boolean;
+}
+
 export interface FeedEntry {
   readonly id: number;
   readonly itemId: string;
@@ -221,6 +245,8 @@ export interface AdventurersState {
 export type WindowId =
   | 'dialogue'
   | 'shop'
+  | 'enhance'
+  | 'quests'
   | 'exchange'
   | 'trade'
   | 'guild'
@@ -411,6 +437,7 @@ export interface Stores {
   readonly net: Store<NetState>;
   readonly players: Store<PlayersState>;
   readonly player: Store<PlayerState>;
+  readonly quests: Store<QuestsState>;
   readonly world: Store<WorldState>;
   readonly chat: Store<ChatState>;
   readonly ui: Store<UiState>;
@@ -513,6 +540,7 @@ export function createStores(): Stores {
     }),
     settings: createSettingsStore(),
     inventory: createStore<InventoryState>({ slots: [], cursor: null, selected: 0, version: -1 }),
+    quests: createStore<QuestsState>({ active: [], available: [], doneStory: 0, nearGiver: false }),
     feed: createStore<FeedState>({ pickups: [], toast: null }),
     combat: createStore<CombatState>({
       skillBar: [],

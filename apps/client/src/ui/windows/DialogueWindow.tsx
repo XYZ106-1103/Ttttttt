@@ -1,4 +1,4 @@
-import { GUILD_FOUND_COST, GUILD_FOUND_LEVEL, type PlayerRequest } from '@world/shared';
+import { getNpcDef, GUILD_FOUND_COST, GUILD_FOUND_LEVEL, type PlayerRequest } from '@world/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { showToast } from '../../app/stores';
 import { getLanguage, t } from '../../i18n';
@@ -113,8 +113,26 @@ export function DialogueWindow(props: Props) {
 
   const options: { label: string; onClick: () => void; testId: string; disabled?: boolean }[] = [];
   if (target.kind === 'npc') {
-    const role = target.id === 'shopkeeper' ? 'shop' : target.id === 'clerk' ? 'exchange' : 'guild';
-    if (role === 'shop')
+    const role = getNpcDef(target.id)?.role;
+    if (role === 'quests')
+      options.push({
+        label: t('dlg.quests'),
+        onClick: () => {
+          closeWindow(stores, 'dialogue');
+          openWindow(stores, 'quests');
+        },
+        testId: 'dlg-quests',
+      });
+    if (role === 'smith')
+      options.push({
+        label: t('dlg.enhance'),
+        onClick: () => {
+          closeWindow(stores, 'dialogue');
+          openWindow(stores, 'enhance');
+        },
+        testId: 'dlg-enhance',
+      });
+    if (role === 'shop' || role === 'smith')
       options.push({
         label: t('dlg.shop'),
         onClick: () => {

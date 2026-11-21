@@ -218,6 +218,14 @@ export class GameAudio {
         case 'consumed':
           this.play('drink');
           break;
+        case 'questDone':
+          this.play('victory');
+          break;
+        case 'enhanced':
+          this.play(
+            n.outcome === 'success' ? 'level_up' : n.outcome === 'drop' ? 'break' : 'error',
+          );
+          break;
       }
     }
     if (ev.sales.length > 0) this.play('coin');

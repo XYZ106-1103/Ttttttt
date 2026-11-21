@@ -163,6 +163,7 @@ export class Market {
     if (slot !== undefined) {
       const st = t.inventory.get(slot);
       if (!st || st.itemId !== itemId || st.count < count) return fail('no_item');
+      if (st.plus) return fail('bound');
       t.inventory.removeAt(slot, count);
     } else if (!t.inventory.remove(itemId, count)) return fail('no_item');
     const listing: Listing = {

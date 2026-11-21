@@ -43,6 +43,21 @@ export const SHOP_DEFS: readonly ShopDef[] = [
       { item: 'copper_pickaxe', max: 1, restock: 0.25 },
     ],
   },
+  {
+    id: 'smithy',
+    nameKey: 'shop.smithy',
+    markup: 2,
+    buyRate: 0.4,
+    stock: [
+      { item: 'enhance_stone', max: 40, restock: 6 },
+      { item: 'copper_pickaxe', max: 2, restock: 0.5 },
+      { item: 'copper_axe', max: 2, restock: 0.5 },
+      { item: 'copper_sword', max: 1, restock: 0.25 },
+      { item: 'copper_helmet', max: 1, restock: 0.25 },
+      { item: 'copper_armor', max: 1, restock: 0.25 },
+      { item: 'copper_greaves', max: 1, restock: 0.25 },
+    ],
+  },
 ];
 
 export function getShopDef(id: string): ShopDef | undefined {

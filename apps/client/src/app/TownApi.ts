@@ -20,6 +20,12 @@ export interface TownApi {
   sellTo(key: string, itemId: string, count: number): Promise<R<'sellTo'>>;
   shopBuy(npcId: string, itemId: string, count: number): Promise<R<'shopBuy'>>;
   shopSell(npcId: string, slot: number, count: number): Promise<R<'shopSell'>>;
+  enhance(slot: number): Promise<R<'enhance'>>;
+  acceptQuest(id: string): Promise<R<'acceptQuest'>>;
+  turnInQuest(id: string): Promise<R<'turnInQuest'>>;
+  abandonQuest(id: string): void;
+  /** Next to the quest giver (local view). */
+  questGiverNear(): boolean;
   marketList(slot: number, count: number, price: number): Promise<R<'marketList'>>;
   marketBuy(listingId: number, count: number): Promise<R<'marketBuy'>>;
   marketCancel(listingId: number): Promise<R<'marketCancel'>>;
@@ -45,6 +51,11 @@ export function localTown(town: TownServices): TownApi {
     sellTo: async (key, item, n) => town.sellTo(key, item, n),
     shopBuy: async (npc, item, n) => town.shopBuy(npc, item, n),
     shopSell: async (npc, slot, n) => town.shopSell(npc, slot, n),
+    enhance: async (slot) => town.enhance(slot),
+    acceptQuest: async (id) => town.acceptQuest(id),
+    turnInQuest: async (id) => town.turnInQuest(id),
+    abandonQuest: (id) => void town.abandonQuest(id),
+    questGiverNear: () => town.questGiverNear(),
     marketList: async (slot, n, price) => town.marketList(slot, n, price),
     marketBuy: async (id, n) => town.marketBuy(id, n),
     marketCancel: async (id) => town.marketCancel(id),
@@ -82,6 +93,11 @@ export function remoteTown(local: TownServices, send: CommandSender): TownApi {
     sellTo: (key, item, count) => req('sellTo', { key, item, count }, fail),
     shopBuy: (npc, item, count) => req('shopBuy', { npc, item, count }, fail),
     shopSell: (npc, slot, count) => req('shopSell', { npc, slot, count }, fail),
+    enhance: (slot) => req('enhance', { slot }, fail),
+    acceptQuest: (id) => req('acceptQuest', { id }, fail),
+    turnInQuest: (id) => req('turnInQuest', { id }, fail),
+    abandonQuest: (id) => void send('abandonQuest', { id }),
+    questGiverNear: () => local.questGiverNear(),
     marketList: (slot, count, price) => req('marketList', { slot, count, price }, fail),
     marketBuy: (id, count) => req('marketBuy', { id, count }, fail),
     marketCancel: (id) => req('marketCancel', { id }, fail),

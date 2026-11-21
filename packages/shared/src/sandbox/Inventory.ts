@@ -1,8 +1,16 @@
+import { cleanPlus } from './enhance';
 import { type ItemRegistry, itemRegistry } from './ItemRegistry';
 
 export interface ItemStack {
   readonly itemId: string;
   readonly count: number;
+  /** Enhancement level (equipment only; absent = +0). */
+  readonly plus?: number;
+}
+
+/** Same item instance with a new count (keeps per-instance data such as `plus`). */
+function withCount(s: ItemStack, count: number): ItemStack {
+  return s.plus ? { itemId: s.itemId, count, plus: s.plus } : { itemId: s.itemId, count };
 }
 
 export interface InventoryData {
@@ -60,10 +68,35 @@ export class Inventory {
     return n;
   }
 
+  /** Units of an item available for id-based use (enhanced items are bound and not counted). */
   count(itemId: string): number {
     let n = 0;
-    for (const s of this.slots) if (s && s.itemId === itemId) n += s.count;
+    for (const s of this.slots) if (s && s.itemId === itemId && !s.plus) n += s.count;
     return n;
+  }
+
+  /** Put one item instance (with its per-instance data) into the first empty slot. */
+  place(stack: ItemStack): boolean {
+    if (!this.items.has(stack.itemId) || stack.count <= 0) return false;
+    if (!stack.plus) return this.add(stack.itemId, stack.count) === 0;
+    for (let i = 0; i < this.size; i++) {
+      if (!this.slots[i]) {
+        this.slots[i] = { itemId: stack.itemId, count: 1, plus: stack.plus };
+        this.touch();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Set the enhancement level of the item in a slot. */
+  setPlus(index: number, plus: number): void {
+    const s = this.validIndex(index) ? this.slots[index] : null;
+    if (!s) return;
+    const p = cleanPlus(s.itemId, plus);
+    this.slots[index] =
+      p > 0 ? { itemId: s.itemId, count: s.count, plus: p } : withCount(s, s.count);
+    this.touch();
   }
 
   /** How many of `itemId` could be added right now. */
@@ -112,7 +145,7 @@ export class Inventory {
     let left = count;
     for (let i = this.size - 1; i >= 0 && left > 0; i--) {
       const s = this.slots[i];
-      if (s && s.itemId === itemId) {
+      if (s && s.itemId === itemId && !s.plus) {
         const n = Math.min(left, s.count);
         this.slots[i] = s.count - n > 0 ? { itemId, count: s.count - n } : null;
         left -= n;
@@ -127,7 +160,7 @@ export class Inventory {
     const s = this.validIndex(index) ? this.slots[index] : null;
     if (!s || !Number.isInteger(count) || count <= 0) return 0;
     const n = Math.min(count, s.count);
-    this.slots[index] = s.count - n > 0 ? { itemId: s.itemId, count: s.count - n } : null;
+    this.slots[index] = s.count - n > 0 ? withCount(s, s.count - n) : null;
     this.touch();
     return n;
   }
@@ -188,13 +221,13 @@ export class Inventory {
     if (!cur) {
       if (!slot) return false;
       const take = Math.ceil(slot.count / 2);
-      this.cursorStack = { itemId: slot.itemId, count: take };
-      this.slots[index] =
-        slot.count - take > 0 ? { itemId: slot.itemId, count: slot.count - take } : null;
+      this.cursorStack = withCount(slot, take);
+      this.slots[index] = slot.count - take > 0 ? withCount(slot, slot.count - take) : null;
       this.touch();
       return true;
     }
     if (slot && slot.itemId !== cur.itemId) return false;
+    if (cur.plus || slot?.plus) return false;
     const max = this.items.maxStack(cur.itemId);
     if (slot && slot.count >= max) return false;
     this.slots[index] = { itemId: cur.itemId, count: (slot?.count ?? 0) + 1 };
@@ -206,7 +239,7 @@ export class Inventory {
   /** Replace the cursor stack, returning the previous one (equipment slots use this). */
   swapCursor(stack: ItemStack | null): ItemStack | null {
     const prev = this.cursorStack;
-    this.cursorStack = stack && this.items.has(stack.itemId) ? stack : null;
+    this.cursorStack = stack && this.items.has(stack.itemId) ? this.clean(stack) : null;
     this.touch();
     return prev;
   }
@@ -214,17 +247,30 @@ export class Inventory {
   /** Overwrite one slot (validated). Used by equipment swaps. */
   replaceAt(index: number, stack: ItemStack | null): void {
     if (!this.validIndex(index)) return;
-    this.slots[index] =
-      stack && this.items.has(stack.itemId) && stack.count > 0
-        ? { itemId: stack.itemId, count: Math.min(stack.count, this.items.maxStack(stack.itemId)) }
-        : null;
+    this.slots[index] = stack ? this.clean(stack) : null;
     this.touch();
+  }
+
+  /** Validated copy of an untrusted stack, or null. */
+  private clean(s: unknown): ItemStack | null {
+    if (!s || typeof s !== 'object') return null;
+    const { itemId, count, plus } = s as { itemId?: unknown; count?: unknown; plus?: unknown };
+    if (typeof itemId !== 'string' || !this.items.has(itemId)) return null;
+    const n = Math.min(Math.floor(Number(count)), this.items.maxStack(itemId));
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const p = cleanPlus(itemId, plus);
+    return p > 0 ? { itemId, count: n, plus: p } : { itemId, count: n };
   }
 
   /** Put the cursor stack back into the inventory. Returns what did not fit (to drop in world). */
   returnCursor(): ItemStack | null {
     const cur = this.cursorStack;
     if (!cur) return null;
+    if (cur.plus) {
+      // An enhanced item is never dropped: it stays on the cursor until there is room.
+      if (this.place(cur)) this.cursorStack = null;
+      return null;
+    }
     this.cursorStack = null;
     const left = this.add(cur.itemId, cur.count);
     this.touch();
@@ -239,16 +285,9 @@ export class Inventory {
   load(data: Partial<InventoryData> | null | undefined): void {
     this.slots.fill(null);
     this.cursorStack = null;
-    const clean = (s: unknown): ItemStack | null => {
-      if (!s || typeof s !== 'object') return null;
-      const { itemId, count } = s as { itemId?: unknown; count?: unknown };
-      if (typeof itemId !== 'string' || !this.items.has(itemId)) return null;
-      const n = Math.min(Math.floor(Number(count)), this.items.maxStack(itemId));
-      return Number.isFinite(n) && n > 0 ? { itemId, count: n } : null;
-    };
-    (data?.slots ?? []).slice(0, this.size).forEach((s, i) => (this.slots[i] = clean(s)));
-    const cur = clean(data?.cursor);
-    if (cur) this.add(cur.itemId, cur.count);
+    (data?.slots ?? []).slice(0, this.size).forEach((s, i) => (this.slots[i] = this.clean(s)));
+    const cur = this.clean(data?.cursor);
+    if (cur && !this.place(cur)) this.cursorStack = cur;
     this.touch();
   }
 }

@@ -137,6 +137,24 @@ export const COMMANDS: Readonly<Record<string, Handler>> = {
     const r = c.session.town.shopSell(str(a, 'npc'), slot, count);
     return journalResult(c, 'shop_sell', r, { item, count, total: 'total' in r ? r.total : 0 });
   },
+  enhance: (c, a) => {
+    const slot = int(a, 'slot', 0, INVENTORY_SIZE - 1);
+    const r = c.session.town.enhance(slot);
+    return journalResult(c, 'enhance', r, {
+      item: r.ok ? r.itemId : '',
+      plus: r.ok ? r.plus : 0,
+      outcome: r.ok ? r.outcome : '',
+    });
+  },
+  acceptQuest: (c, a) => {
+    const id = str(a, 'id');
+    return journalResult(c, 'quest_accept', c.session.town.acceptQuest(id), { id });
+  },
+  turnInQuest: (c, a) => {
+    const id = str(a, 'id');
+    return journalResult(c, 'quest_done', c.session.town.turnInQuest(id), { id });
+  },
+  abandonQuest: (c, a) => ok(c.session.town.abandonQuest(str(a, 'id'))),
   marketList: (c, a) => {
     const slot = int(a, 'slot', 0, INVENTORY_SIZE - 1);
     const item = c.session.character.inventory.get(slot)?.itemId ?? '';

@@ -44,7 +44,7 @@ export function capturePrivate(c: Character): PrivateFull {
   const cur = c.inventory.cursor;
   return {
     snap: { ...c.exportSnapshot(), hp: 0, mp: 0 },
-    cursor: cur ? { itemId: cur.itemId, count: cur.count } : null,
+    cursor: cur ? { ...cur } : null,
   };
 }
 
@@ -74,7 +74,7 @@ export function captureVitals(c: Character): Vitals {
 /** Client: overwrite the local mirror's private state from the server's. */
 export function applyPrivate(c: Character, p: PrivateFull): void {
   c.importSnapshot(p.snap);
-  c.inventory.swapCursor(p.cursor ? { itemId: p.cursor.itemId, count: p.cursor.count } : null);
+  c.inventory.swapCursor(p.cursor ? { ...p.cursor } : null);
 }
 
 /** Client: overwrite the local mirror's vitals from the server's. */

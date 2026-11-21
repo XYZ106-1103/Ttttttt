@@ -18,6 +18,8 @@ const ROLE_COLOR: Record<string, string> = {
   shop: '#f2c46a',
   exchange: '#8fd0ff',
   guild: '#ff9f9f',
+  smith: '#ffb070',
+  quests: '#b6f08a',
 };
 
 /**

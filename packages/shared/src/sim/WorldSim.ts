@@ -23,7 +23,9 @@ import type { MonsterEvent } from '../monsters/brains';
 import { MonsterManager } from '../monsters/MonsterManager';
 import { rollLoot } from '../monsters/spawning';
 import { isRegionSolid } from '../physics/TileCollider';
-import { craft, type CraftResult } from '../sandbox/crafting';
+import { craft, type CraftResult, getRecipe } from '../sandbox/crafting';
+import { getQuestDef } from '../data/quests';
+import type { QuestFail } from '../quests/QuestLog';
 import type { EquipFail, EquipSlotId } from '../sandbox/Equipment';
 import {
   type Drop,
@@ -39,6 +41,7 @@ import { Society } from '../society/Society';
 import { WorldClock } from '../time/WorldClock';
 import { DEFAULT_OVERWORLD, OverworldGenerator } from '../world/generation/OverworldGenerator';
 import { World } from '../world/World';
+import { MAX_GOLD } from '../actors/Character';
 import { type DropEntity, DropSystem, GOLD_DROP } from '../actors/DropSystem';
 import {
   bestPotion,
@@ -85,7 +88,14 @@ export type SimNotice =
   | { readonly kind: 'respawned' }
   | { readonly kind: 'bossSpawned'; readonly monsterId: string }
   | { readonly kind: 'bossDefeated'; readonly monsterId: string }
-  | { readonly kind: 'consumed'; readonly itemId: string };
+  | { readonly kind: 'consumed'; readonly itemId: string }
+  | {
+      readonly kind: 'enhanced';
+      readonly itemId: string;
+      readonly plus: number;
+      readonly outcome: 'success' | 'fail' | 'drop';
+    }
+  | { readonly kind: 'questDone'; readonly questId: string };
 
 /** What happened to one player since their events were last read. */
 export interface PlayerEvents {
@@ -208,6 +218,8 @@ export class WorldSim {
   monstersEnabled: boolean;
   protected readonly ctx: InteractionContext;
   private readonly lootRng: Rng;
+  /** Blacksmith enhancement rolls. */
+  readonly enhanceRng: Rng;
   private readonly charEnv: { -readonly [K in keyof CharacterEnv]: CharacterEnv[K] };
   private readonly slots = new Map<string, PlayerSlot>();
   private lastNewsId: number;
@@ -233,6 +245,7 @@ export class WorldSim {
       deriveSeed(options.seed, 'monsters'),
     );
     this.lootRng = new Rng(deriveSeed(options.seed, 'loot'));
+    this.enhanceRng = new Rng(deriveSeed(options.seed, 'enhance'));
     this.dropSystem = new DropSystem(deriveSeed(options.seed, 'drops'));
     this.monstersEnabled = options.monsters ?? true;
     this.charEnv = {
@@ -411,6 +424,7 @@ export class WorldSim {
         },
       };
       this.handlePlayerOut(slot, out);
+      if (this.tickCount % 30 === 0) this.checkReach(slot);
     }
 
     // Adventurers (the same step function, driven by their brains).
@@ -641,6 +655,7 @@ export class WorldSim {
     const slot = this.slots.get(key);
     if (slot) {
       const p = slot.character;
+      p.quests.onKill(m.def.id);
       const amount = Math.max(1, Math.round(expForKill(m.def.exp, p.level, m.def.level) * mul));
       slot.events.exp.push({ amount, x: m.motor.x, y: m.motor.y - m.motor.height });
       const gained = p.gainExp(amount);
@@ -766,6 +781,19 @@ export class WorldSim {
     return true;
   }
 
+  /** A player's enhancement attempt finished (TownServices). */
+  onEnhanced(
+    key: string,
+    itemId: string,
+    plus: number,
+    outcome: 'success' | 'fail' | 'drop',
+  ): void {
+    const slot = this.slots.get(key);
+    if (!slot) return;
+    slot.events.notices.push({ kind: 'enhanced', itemId, plus, outcome });
+    slot.character.quests.onEnhance(plus);
+  }
+
   /** Quick-use the strongest potion of a kind from anywhere in the inventory (H / J keys). */
   quickUse(key: string, kind: 'heal' | 'mana'): boolean {
     const best = bestPotion(this.need(key).character, kind);
@@ -839,7 +867,71 @@ export class WorldSim {
   }
 
   craft(key: string, recipeId: string, times = 1): CraftResult {
-    return craft(this.need(key).character.inventory, recipeId, times);
+    const p = this.need(key).character;
+    const r = craft(p.inventory, recipeId, times);
+    const recipe = r.ok ? getRecipe(recipeId) : undefined;
+    if (recipe) p.quests.onCraft(recipe.output.item, recipe.output.count * r.crafted);
+    return r;
+  }
+
+  /** Grant experience to a player outside combat (quest rewards). */
+  private grantExp(slot: PlayerSlot, amount: number): void {
+    const p = slot.character;
+    if (amount <= 0) return;
+    slot.events.exp.push({ amount, x: p.motor.x, y: p.motor.y - 40 });
+    if (p.gainExp(amount) > 0) {
+      p.refreshStats(this.time);
+      p.hp = p.stats.maxHp;
+      p.mp = p.stats.maxMp;
+      slot.events.levelUps.push(p.level);
+      this.worldEvents.levelUps.push({ id: p.id, level: p.level });
+    }
+  }
+
+  // --- Quests -------------------------------------------------------------------------------
+
+  acceptQuest(key: string, id: string): QuestFail | null {
+    const slot = this.need(key);
+    const p = slot.character;
+    const def = getQuestDef(id);
+    const fail = p.quests.canAccept(def, key, p.level, this.clock.day);
+    if (fail || !def) return fail ?? 'unknown';
+    p.quests.accept(def);
+    this.checkReach(slot);
+    return null;
+  }
+
+  abandonQuest(key: string, id: string): boolean {
+    return this.need(key).character.quests.abandon(id);
+  }
+
+  /** Hand in a finished quest: take collected items, pay the reward. */
+  turnInQuest(key: string, id: string): QuestFail | null {
+    const slot = this.need(key);
+    const p = slot.character;
+    const q = p.quests.active.find((a) => a.id === id);
+    const def = getQuestDef(id);
+    if (!q || !def) return 'not_active';
+    if (!p.quests.complete(q, p.inventory)) return 'incomplete';
+    const freeNeeded = def.reward.items.filter((it) => p.inventory.capacityFor(it.item) < it.count);
+    if (freeNeeded.length > 0 || p.gold + def.reward.gold > MAX_GOLD) return 'no_room';
+    for (const o of def.objectives) if (o.kind === 'collect') p.inventory.remove(o.item, o.count);
+    p.quests.finish(id, this.clock.day);
+    p.gold += def.reward.gold;
+    this.economy.ledger.create('quest', def.reward.gold);
+    for (const it of def.reward.items) p.inventory.add(it.item, it.count);
+    this.grantExp(slot, def.reward.exp);
+    slot.events.notices.push({ kind: 'questDone', questId: id });
+    return null;
+  }
+
+  /** Surface "reach" objectives: is the player standing in the biome? */
+  private checkReach(slot: PlayerSlot): void {
+    const p = slot.character;
+    if (!p.alive || !p.quests.wants('reach')) return;
+    const tx = Math.floor(p.motor.x / TILE_SIZE);
+    if (Math.floor(p.motor.y / TILE_SIZE) - this.world.surfaceY(tx) > 4) return;
+    p.quests.onReach(biomeAt(tx, this.world.generator.spawnTileX).id);
   }
 
   allocateStat(key: string, stat: StatKey, amount = 1): boolean {

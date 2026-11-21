@@ -3,6 +3,7 @@
  * All operations validate slot category and level requirements so this can run on the server.
  */
 import type { EquipCategory, StatBonus } from '../data/items';
+import { cleanPlus, enhancedBonus } from './enhance';
 import type { Inventory, ItemStack } from './Inventory';
 import { type ItemRegistry, itemRegistry } from './ItemRegistry';
 
@@ -20,6 +21,10 @@ const SLOT_CATEGORY: Readonly<Record<EquipSlotId, EquipCategory>> = {
 export type EquipFail = 'not_equipment' | 'wrong_slot' | 'level' | 'invalid' | 'no_space';
 
 export type EquipmentData = Partial<Record<EquipSlotId, ItemStack | null>>;
+
+function one(s: ItemStack): ItemStack {
+  return s.plus ? { itemId: s.itemId, count: 1, plus: s.plus } : { itemId: s.itemId, count: 1 };
+}
 
 export class Equipment {
   private readonly slots: Record<EquipSlotId, ItemStack | null> = {
@@ -69,7 +74,7 @@ export class Equipment {
     if (fail) return fail;
     const worn = this.slots[slot];
     inv.replaceAt(index, worn);
-    this.slots[slot] = { itemId: stack.itemId, count: 1 };
+    this.slots[slot] = one(stack);
     this.version++;
     return null;
   }
@@ -78,8 +83,7 @@ export class Equipment {
   unequip(inv: Inventory, slot: EquipSlotId): EquipFail | null {
     const worn = this.slots[slot];
     if (!worn) return 'invalid';
-    if (inv.capacityFor(worn.itemId) < 1) return 'no_space';
-    inv.add(worn.itemId, 1);
+    if (!inv.place(worn)) return 'no_space';
     this.slots[slot] = null;
     this.version++;
     return null;
@@ -96,7 +100,7 @@ export class Equipment {
       if (fail) return fail;
       const worn = this.slots[slot];
       inv.swapCursor(worn);
-      this.slots[slot] = { itemId: cur.itemId, count: 1 };
+      this.slots[slot] = one(cur);
       this.version++;
       return null;
     }
@@ -113,7 +117,7 @@ export class Equipment {
     for (const s of EQUIP_SLOTS) {
       const st = this.slots[s];
       const bonus = st ? this.items.get(st.itemId)?.equip?.bonus : undefined;
-      if (bonus) out.push(bonus);
+      if (bonus && st) out.push(enhancedBonus(bonus, st.plus ?? 0));
     }
     return out;
   }
@@ -133,7 +137,7 @@ export class Equipment {
           typeof st.itemId === 'string' &&
           this.check(st.itemId, s, Number.MAX_SAFE_INTEGER) === null
         )
-          this.slots[s] = { itemId: st.itemId, count: 1 };
+          this.slots[s] = one({ itemId: st.itemId, count: 1, plus: cleanPlus(st.itemId, st.plus) });
       }
     }
     this.version++;

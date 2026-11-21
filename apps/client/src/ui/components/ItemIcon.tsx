@@ -16,6 +16,7 @@ export function ItemIcon({
     <span className="pw-item" style={{ width: size, height: size }}>
       {src ? <img src={src} alt="" width={size} height={size} draggable={false} /> : null}
       {stack.count > 1 ? <span className="pw-item__count">{stack.count}</span> : null}
+      {stack.plus ? <span className="pw-item__plus">+{stack.plus}</span> : null}
     </span>
   );
 }

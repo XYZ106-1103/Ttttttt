@@ -119,6 +119,11 @@ export const RECIPE_DEFS: readonly RecipeDef[] = [
     ['tyrant_scale', 1],
   ]),
 
+  r('enhance_stone', 'enhance_stone', 2, [
+    ['iron_ore', 2],
+    ['stone', 6],
+  ]),
+
   // Consumables
   r('healing_potion', 'healing_potion', 2, [
     ['mushroom', 1],

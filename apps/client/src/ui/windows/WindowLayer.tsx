@@ -8,6 +8,8 @@ import { DialogueWindow } from './DialogueWindow';
 import { ExchangeWindow } from './ExchangeWindow';
 import { GuildWindow } from './GuildWindow';
 import { ShopWindow } from './ShopWindow';
+import { EnhanceWindow } from './EnhanceWindow';
+import { QuestWindow } from './QuestWindow';
 import { TradeWindow } from './TradeWindow';
 import { CharacterWindow } from './CharacterWindow';
 import { RosterWindow } from './RosterWindow';
@@ -38,6 +40,8 @@ const COMPONENTS: Record<WindowId, WindowComponent> = {
   jobAdvance: JobAdvanceWindow,
   dialogue: DialogueWindow,
   shop: ShopWindow,
+  enhance: EnhanceWindow,
+  quests: QuestWindow,
   exchange: ExchangeWindow,
   trade: TradeWindow,
   guild: GuildWindow,

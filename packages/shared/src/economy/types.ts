@@ -26,7 +26,9 @@ export type TradeFail =
   | 'too_many'
   | 'no_listing'
   | 'not_seller'
-  | 'expired';
+  | 'expired'
+  /** Enhanced items are bound to their owner. */
+  | 'bound';
 
 export type Failed = { readonly ok: false; readonly reason: TradeFail };
 export type TradeResult = { readonly ok: true } | Failed;
@@ -36,7 +38,14 @@ export const OK: TradeResult = { ok: true };
 
 /** Where gold enters (faucets) and leaves (sinks) the world. */
 export type GoldFlow =
-  'loot' | 'shop_buyback' | 'shop_sale' | 'market_fee' | 'guild_found' | 'expired_drop';
+  | 'loot'
+  | 'shop_buyback'
+  | 'shop_sale'
+  | 'market_fee'
+  | 'guild_found'
+  | 'expired_drop'
+  | 'enhance'
+  | 'quest';
 
 /**
  * Gold accounting. Transfers between traders never touch it; only faucets and sinks do, so

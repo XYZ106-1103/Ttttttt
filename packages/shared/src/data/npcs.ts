@@ -2,7 +2,7 @@
  * Village NPCs (non-player characters). They never move or fight; talking to one opens its
  * service. Positions are tile columns relative to the spawn column.
  */
-export type NpcRole = 'shop' | 'exchange' | 'guild';
+export type NpcRole = 'shop' | 'exchange' | 'guild' | 'smith' | 'quests';
 
 export interface NpcDef {
   readonly id: string;
@@ -28,6 +28,16 @@ export const NPC_DEFS: readonly NpcDef[] = [
   },
   { id: 'clerk', nameKey: 'npc.clerk', role: 'exchange', x: 18, look: 0x3c11, facing: -1 },
   { id: 'registrar', nameKey: 'npc.registrar', role: 'guild', x: -25, look: 0x7e42, facing: 1 },
+  {
+    id: 'blacksmith',
+    nameKey: 'npc.blacksmith',
+    role: 'smith',
+    x: 5,
+    look: 0x2b9d,
+    facing: -1,
+    shopId: 'smithy',
+  },
+  { id: 'guide', nameKey: 'npc.guide', role: 'quests', x: -7, look: 0x61c3, facing: 1 },
 ];
 
 /** Market stall columns (relative to spawn) kept by merchant adventurers. */

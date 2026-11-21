@@ -478,6 +478,56 @@ body {
   display: block;
   image-rendering: pixelated;
 }
+.pw-item__plus {
+  position: absolute;
+  left: -3px;
+  top: -5px;
+  font-size: 10px;
+  color: #ffd25a;
+  text-shadow:
+    1px 0 0 #000,
+    -1px 0 0 #000,
+    0 1px 0 #000,
+    0 -1px 0 #000;
+  pointer-events: none;
+}
+
+.pw-enhance {
+  display: flex;
+  gap: 12px;
+}
+
+.pw-enhance__panel {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+}
+
+.pw-enhance__slot {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--pw-border, #5a4a3a);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.pw-enhance__result.is-success {
+  color: #7fd67a;
+}
+
+.pw-enhance__result.is-fail {
+  color: #ffb648;
+}
+
+.pw-enhance__result.is-drop {
+  color: #ff6a5a;
+}
+
 .pw-item__count {
   position: absolute;
   right: -4px;
@@ -2620,4 +2670,103 @@ body {
   text-align: right;
   font-size: 11px;
   color: var(--text-faint);
+}
+
+/* --- Quests ------------------------------------------------------------------------------- */
+.pw-quest__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.pw-quest {
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.pw-quest__head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.pw-quest__kind {
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #5a4a2a;
+}
+
+.pw-quest__kind.is-bounty {
+  background: #2a4a5a;
+}
+
+.pw-quest__desc {
+  margin: 4px 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.pw-quest__objectives {
+  margin: 4px 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.pw-quest__objectives .is-done {
+  color: #7fd67a;
+}
+
+.pw-quest__rewards {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: #ffd25a;
+}
+
+.pw-quest__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pw-quest-tracker {
+  position: absolute;
+  right: 12px;
+  top: 220px;
+  width: 210px;
+  padding: 6px 8px;
+  text-align: left;
+  font: inherit;
+  font-size: 11px;
+  color: #f1ecdf;
+  background: rgba(10, 12, 20, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.pw-quest-tracker__title {
+  font-size: 12px;
+  color: #ffd25a;
+  margin-bottom: 2px;
+}
+
+.pw-quest-tracker__item {
+  margin-top: 4px;
+}
+
+.pw-quest-tracker__item.is-complete .pw-quest-tracker__name {
+  color: #7fd67a;
+}
+
+.pw-quest-tracker__obj {
+  opacity: 0.8;
+  padding-left: 8px;
 }

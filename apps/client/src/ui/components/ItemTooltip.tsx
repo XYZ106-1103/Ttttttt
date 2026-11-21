@@ -1,4 +1,10 @@
-import { itemRegistry, type ItemStack, type StatBonus } from '@world/shared';
+import {
+  enhancedBonus,
+  enhancedWeapon,
+  itemRegistry,
+  type ItemStack,
+  type StatBonus,
+} from '@world/shared';
 import { t } from '../../i18n';
 import { useServices } from '../context';
 import { useStore } from '../hooks/useStore';
@@ -37,11 +43,16 @@ export function ItemTooltip({
   const def = itemRegistry.get(stack.itemId);
   if (!def) return null;
   const req = def.weapon?.reqLevel ?? def.equip?.reqLevel ?? 0;
-  const bonuses = bonusLines(def.weapon?.bonus ?? def.equip?.bonus);
+  const plus = stack.plus ?? 0;
+  const weapon = def.weapon ? enhancedWeapon(def.weapon, plus) : undefined;
+  const bonuses = bonusLines(
+    def.weapon?.bonus ?? (def.equip ? enhancedBonus(def.equip.bonus, plus) : undefined),
+  );
   return (
     <div className="pw-tooltip pw-panel" style={{ left: x + 16, top: y + 12 }} role="tooltip">
       <div className="pw-tooltip__name" style={{ color: RARITY_COLORS[def.rarity] }}>
         {t(def.nameKey)}
+        {plus > 0 ? ` +${plus}` : ''}
       </div>
       <div className="pw-tooltip__meta">
         {t(`itemKind.${def.kind}`)} · {t(`rarity.${def.rarity}`)}
@@ -60,14 +71,14 @@ export function ItemTooltip({
           </span>
         </div>
       ) : null}
-      {def.weapon ? (
+      {weapon ? (
         <div className="pw-tooltip__stats">
-          <span>{t(`weaponType.${def.weapon.type}`)}</span>
+          <span>{t(`weaponType.${weapon.type}`)}</span>
           <span>
-            {t(def.weapon.type === 'staff' ? 'bonus.magic' : 'bonus.attack')} {def.weapon.attack}
+            {t(weapon.type === 'staff' ? 'bonus.magic' : 'bonus.attack')} {weapon.attack}
           </span>
           <span>
-            {t('tool.speed')} ×{def.weapon.speed.toFixed(2)}
+            {t('tool.speed')} ×{weapon.speed.toFixed(2)}
           </span>
         </div>
       ) : null}
@@ -98,6 +109,7 @@ export function ItemTooltip({
       ) : null}
       <p className="pw-tooltip__desc">{t(def.descKey)}</p>
       {def.equip ? <p className="pw-tooltip__hint">{t('inv.equipHint')}</p> : null}
+      {plus > 0 ? <p className="pw-tooltip__hint">{t('enhance.bound')}</p> : null}
     </div>
   );
 }

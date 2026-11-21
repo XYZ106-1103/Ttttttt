@@ -33,7 +33,9 @@ import { createMotorState, type MotorState } from '../physics/CharacterMotor';
 import { type EquipFail, Equipment, type EquipmentData } from '../sandbox/Equipment';
 import type { HitProgress } from '../sandbox/interaction';
 import { HOTBAR_SIZE, Inventory, type InventoryData } from '../sandbox/Inventory';
+import { enhancedWeapon } from '../sandbox/enhance';
 import { itemRegistry } from '../sandbox/ItemRegistry';
+import { QuestLog, type QuestLogData } from '../quests/QuestLog';
 
 export const SKILL_BAR_SIZE = 4;
 /** Invulnerability after taking a hit (s). */
@@ -65,6 +67,7 @@ export interface CharacterSnapshot {
   readonly inventory?: InventoryData;
   readonly selectedSlot?: number;
   readonly gold?: number;
+  readonly quests?: QuestLogData;
 }
 
 /** Most gold one character can hold. */
@@ -80,6 +83,7 @@ export class Character implements Combatant {
   readonly body: MotorState;
   readonly motor: MotorState;
   readonly statuses = new StatusSet();
+  readonly quests = new QuestLog();
   readonly immune: ReadonlySet<string> = new Set();
   readonly inventory = new Inventory();
   readonly equipment = new Equipment();
@@ -139,7 +143,8 @@ export class Character implements Combatant {
   /** Weapon in the selected hotbar slot, if any (regardless of level requirement). */
   heldWeapon(): WeaponStats | null {
     const st = this.inventory.get(this.selectedSlot);
-    return (st && itemRegistry.get(st.itemId)?.weapon) ?? null;
+    const w = st ? itemRegistry.get(st.itemId)?.weapon : undefined;
+    return w && st ? enhancedWeapon(w, st.plus ?? 0) : null;
   }
 
   /** Held weapon if the character meets its level requirement. */
@@ -274,6 +279,7 @@ export class Character implements Combatant {
       inventory: this.inventory.toJSON(),
       selectedSlot: this.selectedSlot,
       gold: this.gold,
+      quests: this.quests.toJSON(),
     };
   }
 
@@ -283,6 +289,7 @@ export class Character implements Combatant {
    */
   importSnapshot(p: CharacterSnapshot, legacy = false): void {
     this.inventory.load(p.inventory);
+    this.quests.load(p.quests);
     this.selectedSlot = Math.max(
       0,
       Math.min(HOTBAR_SIZE - 1, Math.floor(finite(p.selectedSlot, 0))),

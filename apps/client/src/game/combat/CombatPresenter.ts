@@ -8,6 +8,7 @@ import {
   scaled,
   type ActorEvent,
 } from '@world/shared';
+import { getQuestDef, itemRegistry } from '@world/shared';
 import { t } from '../../i18n';
 import { pushChat, showToast, type Stores } from '../../app/stores';
 import type { CameraController } from '../camera/CameraController';
@@ -58,6 +59,20 @@ function hex(c: string): number {
  * monster/projectile sprites, weapon trails, damage numbers, hitstop, screen shake, level-up
  * pillars, telegraphs, toasts and the combat HUD store. No game rules live here.
  */
+/** Display name of a quest from its id (bounty titles name their target). */
+function questName(id: string): string {
+  const def = getQuestDef(id);
+  if (!def) return id;
+  const o = def.objectives[0];
+  const target =
+    o?.kind === 'kill'
+      ? t(`monster.${o.target}`)
+      : o?.kind === 'collect'
+        ? t(itemRegistry.get(o.item)?.nameKey ?? o.item)
+        : '';
+  return t(def.nameKey, { target });
+}
+
 export class CombatPresenter {
   readonly monsters: MonsterRenderer;
   readonly adventurers: AdventurerRenderer;
@@ -459,6 +474,18 @@ export class CombatPresenter {
         break;
       case 'consumed':
         break;
+      case 'questDone':
+        pushChat(this.stores, 'notice', t('quest.doneChat', { name: questName(n.questId) }));
+        break;
+      case 'enhanced': {
+        const item = t(itemRegistry.get(n.itemId)?.nameKey ?? n.itemId);
+        pushChat(this.stores, 'system', t(`notice.enhanced.${n.outcome}`, { item, plus: n.plus }));
+        if (n.outcome === 'success') {
+          const m = this.sim.player.motor;
+          this.fx.ring(m.x, m.y - 22, 2, 0xffd25a);
+        }
+        break;
+      }
     }
   }
 

@@ -14,6 +14,16 @@ import { getNpcDef, NPC_DEFS, NPC_REACH, type NpcDef } from '../data/npcs';
 import type { BuyResult, Collected, ListResult } from '../economy/Market';
 import type { NpcShop, ShopResult } from '../economy/NpcShop';
 import { directTrade } from '../economy/trade';
+import {
+  ENHANCE_STONE,
+  enhanceable,
+  enhanceCost,
+  type EnhanceResult,
+  MAX_PLUS,
+  rollEnhance,
+} from '../sandbox/enhance';
+import { itemRegistry } from '../sandbox/ItemRegistry';
+import type { QuestFail } from '../quests/QuestLog';
 import type { TradeFail } from '../economy/types';
 import type { FoundResult } from '../society/Guild';
 import { MAX_PARTY, type Party } from '../society/Party';
@@ -120,6 +130,62 @@ export class TownServices {
     if (!shop || !this.near(npcId)) return tooFar;
     if (!st) return { ok: false, reason: 'no_item' };
     return shop.sell(this.player, st.itemId, count, slot);
+  }
+
+  // --- Blacksmith ---------------------------------------------------------------------------
+
+  private smithNear(): boolean {
+    return this.npcs.some((n) => n.def.role === 'smith' && this.near(n.def.id));
+  }
+
+  /** Try to enhance the equipment in an inventory slot (pays gold and stones up front). */
+  enhance(slot: number): EnhanceResult {
+    if (!this.smithNear()) return { ok: false, reason: 'too_far' };
+    const p = this.player;
+    const st = p.inventory.get(slot);
+    const def = st ? itemRegistry.get(st.itemId) : undefined;
+    if (!st || !def) return { ok: false, reason: 'invalid' };
+    if (!enhanceable(def)) return { ok: false, reason: 'not_gear' };
+    const plus = st.plus ?? 0;
+    if (plus >= MAX_PLUS) return { ok: false, reason: 'max' };
+    const cost = enhanceCost(def, plus);
+    if (p.gold < cost.gold) return { ok: false, reason: 'no_gold' };
+    if (p.inventory.count(ENHANCE_STONE) < cost.stones) return { ok: false, reason: 'no_stones' };
+    p.gold -= cost.gold;
+    p.inventory.remove(ENHANCE_STONE, cost.stones);
+    this.sim.economy.ledger.destroy('enhance', cost.gold);
+    const r = rollEnhance(plus, this.sim.enhanceRng);
+    p.inventory.setPlus(slot, r.plus);
+    p.refreshStats(this.now);
+    this.sim.onEnhanced(this.key, st.itemId, r.plus, r.outcome);
+    return { ok: true, outcome: r.outcome, itemId: st.itemId, plus: r.plus };
+  }
+
+  // --- Quests -------------------------------------------------------------------------------
+
+  /** Is the player next to the quest giver? */
+  questGiverNear(): boolean {
+    return this.npcs.some((n) => n.def.role === 'quests' && this.near(n.def.id));
+  }
+
+  acceptQuest(
+    id: string,
+  ): { readonly ok: true } | { readonly ok: false; readonly reason: QuestFail } {
+    if (!this.questGiverNear()) return { ok: false, reason: 'too_far' };
+    const fail = this.sim.acceptQuest(this.key, id);
+    return fail ? { ok: false, reason: fail } : { ok: true };
+  }
+
+  turnInQuest(
+    id: string,
+  ): { readonly ok: true } | { readonly ok: false; readonly reason: QuestFail } {
+    if (!this.questGiverNear()) return { ok: false, reason: 'too_far' };
+    const fail = this.sim.turnInQuest(this.key, id);
+    return fail ? { ok: false, reason: fail } : { ok: true };
+  }
+
+  abandonQuest(id: string): boolean {
+    return this.sim.abandonQuest(this.key, id);
   }
 
   // --- Exchange -----------------------------------------------------------------------------

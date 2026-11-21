@@ -12,9 +12,7 @@ import { TitleScreen } from './screens/TitleScreen';
 import { toggleWindow } from './windowActions';
 import { WindowLayer } from './windows/WindowLayer';
 
-const LOCKED: Partial<Record<UiAction, { key: string; phase: string }>> = {
-  quests: { key: 'hud.quests', phase: 'PHASE 6+' },
-};
+const LOCKED: Partial<Record<UiAction, { key: string; phase: string }>> = {};
 
 /** Global hotkeys → UI state. Gameplay keys are polled by the simulation instead. */
 function useHotkeys(): void {
@@ -51,6 +49,9 @@ function useHotkeys(): void {
             break;
           case 'guild':
             if (playing) toggleWindow(stores, 'guild');
+            break;
+          case 'quests':
+            if (playing) toggleWindow(stores, 'quests');
             break;
           case 'keyGuide':
             toggleWindow(stores, 'keyGuide');

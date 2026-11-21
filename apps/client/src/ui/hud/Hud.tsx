@@ -1,3 +1,4 @@
+import { QuestTracker } from './QuestTracker';
 import { BossBar } from './BossBar';
 import { BuffBar } from './BuffBar';
 import { ChatBox } from './ChatBox';
@@ -23,6 +24,7 @@ export function Hud() {
       <BuffBar />
       <BossBar />
       <Minimap />
+      <QuestTracker />
       <RegionBanner />
       <ChatBox />
       <Hotbar />

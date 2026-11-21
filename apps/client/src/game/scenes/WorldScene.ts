@@ -1,3 +1,4 @@
+import { questStamp, questState } from '../../app/questView';
 import Phaser from 'phaser';
 import {
   CHUNK_PIXELS,
@@ -1103,6 +1104,18 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  private questStampValue = '';
+
+  private publishQuests(): void {
+    const p = this.sim.player;
+    const day = this.sim.clock.day;
+    const near = this.sim.town.questGiverNear();
+    const stamp = questStamp(p, day, near);
+    if (stamp === this.questStampValue) return;
+    this.questStampValue = stamp;
+    this.services.stores.quests.set(questState(p, this.sim.selfKey, day, near));
+  }
+
   /** Throttled store updates — the UI never re-renders at frame rate. */
   private publish(dt: number): void {
     const { stores } = this.services;
@@ -1121,6 +1134,7 @@ export class WorldScene extends Phaser.Scene {
     this.publishTimer -= dt;
     if (this.publishTimer <= 0) {
       this.publishTimer = 0.25;
+      this.publishQuests();
       const tx = Math.floor(m.x / TILE_SIZE);
       const ty = Math.floor((m.y - 1) / TILE_SIZE);
       const region = regionAt(tx, this.sim.world.generator.spawnTileX);

@@ -9,6 +9,7 @@ import { PixelCanvas } from '../PixelCanvas';
 
 const S = 16;
 const OUTLINE = hex('#1a1214');
+const WHITE_PX = hex('#ffffff');
 const WOOD = ['#3e2618', '#6b4530', '#8c5d3c', '#b07a4c'].map((c) => hex(c));
 
 const MATERIAL: Record<string, Color[]> = {
@@ -196,6 +197,20 @@ function blobIcon(
       for (let dx = -w; dx <= w; dx++) pc.set(8 + dx, 8 + dy, dx < 0 && dy < 0 ? spec : base);
     }
   }
+  return outlined(pc);
+}
+
+function whetstone(): PixelCanvas {
+  const pc = new PixelCanvas(S, S);
+  const r = hex('#6a7890');
+  shadedBlob(pc, 8, 9, 6, 4.2, {
+    ramp: [shade(r, -0.5), shade(r, -0.2), r, shade(r, 0.3)],
+    power: 2.6,
+    facet: 3,
+  });
+  stroke(pc, 4, 10, 11, 7, 0.4, hex('#7fe0ff'));
+  pc.set(11, 7, WHITE_PX);
+  pc.set(5, 6, hex('#c8d4e8'));
   return outlined(pc);
 }
 
@@ -404,6 +419,8 @@ export function gearIcon(def: ItemDef): PixelCanvas | null {
       return blobIcon(hex('#7fe0ff'), hex('#ffffff'), 'core', undefined, hex('#c8dcf0'));
     case 'ember_sigil':
       return blobIcon(hex('#ff3018'), hex('#ffd25a'), 'core', undefined, hex('#281c44'));
+    case 'enhance_stone':
+      return whetstone();
     case 'harpy_feather':
       return feather();
     case 'frost_fang':
