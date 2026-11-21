@@ -10,6 +10,7 @@ export * from './data/recipes';
 export * from './data/movement';
 export * from './data/classes';
 export * from './data/regions';
+export * from './data/biomes';
 export * from './entities/stats';
 export * from './time/WorldClock';
 export * from './world/TileRegistry';

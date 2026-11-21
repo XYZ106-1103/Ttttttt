@@ -17,6 +17,12 @@ const MATERIAL: Record<string, Color[]> = {
   copper: ['#5a2a14', '#a4532a', '#d9803f', '#f6b871'].map((c) => hex(c)),
   iron: ['#3a3f4f', '#8790a6', '#c3cbda', '#f2f5fa'].map((c) => hex(c)),
   cloth: ['#3a3a2a', '#5e6a3c', '#86955a', '#b4c27e'].map((c) => hex(c)),
+  silver: ['#4a5260', '#a8b4c4', '#dfe6f0', '#ffffff'].map((c) => hex(c)),
+  gold: ['#5a3a08', '#c8901c', '#f2c84b', '#fff2a8'].map((c) => hex(c)),
+  frostite: ['#1a3a5a', '#3a9ad4', '#6fd4ff', '#d4f6ff'].map((c) => hex(c)),
+  magmite: ['#5a1a08', '#c84a14', '#ff7a3a', '#ffd08a'].map((c) => hex(c)),
+  crystal: ['#3a1a5a', '#8a4ad4', '#c58cff', '#f4e0ff'].map((c) => hex(c)),
+  obsidian: ['#120c1c', '#281c44', '#4a3a7a', '#8a7ac4'].map((c) => hex(c)),
 };
 
 function outlined(pc: PixelCanvas): PixelCanvas {

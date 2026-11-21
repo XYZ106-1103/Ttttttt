@@ -37,6 +37,7 @@ const TORCH_RADIUS = 7;
 /** Which spawn zone an empty tile belongs to. */
 export function zoneAt(world: World, tx: number, ty: number): SpawnZone | null {
   if (world.collisionAt(tx, ty) !== COLLISION_NONE) return null;
+  if (world.liquidAt(tx, ty) !== 0) return null;
   const depth = ty - world.surfaceY(tx);
   if (depth < 4) return world.getBg(tx, ty) === 0 ? 'surface' : null;
   if (depth < 10) return null;

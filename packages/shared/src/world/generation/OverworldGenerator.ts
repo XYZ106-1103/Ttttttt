@@ -1,4 +1,12 @@
 import { CHUNK_SIZE } from '../../constants';
+import {
+  BIOME_DEFS,
+  type BiomeId,
+  biomeAt,
+  biomeWeight,
+  LANDMARKS,
+  SEA_LEVEL_OFFSET,
+} from '../../data/biomes';
 import { getObjectDef } from '../../data/objects';
 import { fbm1D, fbm2D, valueNoise1D } from '../../math/noise';
 import { deriveSeed, hash1f, hash2, hash2f, Rng } from '../../math/rng';
@@ -29,11 +37,30 @@ export const DEFAULT_OVERWORLD: Omit<OverworldConfig, 'seed'> = {
 const TREE_CLEARANCE = 7;
 const TREE_CELL = 7;
 
+const BIOME_INDEX: readonly BiomeId[] = [
+  'ocean',
+  'beach',
+  'tundra',
+  'meadow',
+  'village',
+  'forest',
+  'mountains',
+  'volcano',
+];
+/** Rows below the surface. */
+const depth0 = (ty: number, s: number): number => ty - s;
+const LIQ_NONE = 0;
+const LIQ_WATER = 1;
+const LIQ_LAVA = 2;
+/** Water whose top row is frozen into ice. */
+const LIQ_FROZEN = 3;
+
 /**
- * PHASE 1 overworld generator: a single temperate biome ("Verdant Highlands") with rolling hills,
- * layered dirt/stone, a hand-designed starting zone, floating islands and decorative flora.
- *
- * PHASE 2 extends this with biomes, caves, ores, liquids and dungeons.
+ * Overworld generator. Rolling hills with layered dirt/stone, caves and ore veins, shaped per
+ * biome (see data/biomes): seas and sandy coasts at both edges, snowy frost plains with a frozen
+ * lake, the temperate meadow/village/forest (with lakes), tall granite peaks with snow caps, and
+ * a volcano with a lava crater over ash and basalt. A hand-designed starting zone, floating
+ * islands and flora sit on top. Deterministic per seed: server and clients agree on every tile.
  */
 export class OverworldGenerator implements WorldGenerator {
   readonly seed: number;
@@ -44,6 +71,13 @@ export class OverworldGenerator implements WorldGenerator {
 
   private readonly surface: Int16Array;
   private readonly dirtDepth: Int8Array;
+  /** Biome index per column (BIOME_INDEX). */
+  private readonly biome: Uint8Array;
+  /** First liquid row per column (-1 = none) and which liquid. */
+  private readonly liquidTop: Int16Array;
+  private readonly liquidKind: Uint8Array;
+  readonly seaLevel: number;
+  private readonly base: number;
   private readonly stamps: TileStamp[] = [];
   private readonly props = new Map<number, string>();
   private readonly treeExclusions: (readonly [number, number])[];
@@ -60,6 +94,14 @@ export class OverworldGenerator implements WorldGenerator {
     cavern: number;
     copper: number;
     iron: number;
+    silver: number;
+    gold: number;
+    frostite: number;
+    magmite: number;
+    crystal: number;
+    peaks: number;
+    tundra: number;
+    lava: number;
   };
 
   constructor(config: OverworldConfig) {
@@ -79,6 +121,14 @@ export class OverworldGenerator implements WorldGenerator {
       cavern: deriveSeed(this.seed, 'caves.caverns'),
       copper: deriveSeed(this.seed, 'ore.copper'),
       iron: deriveSeed(this.seed, 'ore.iron'),
+      silver: deriveSeed(this.seed, 'ore.silver'),
+      gold: deriveSeed(this.seed, 'ore.gold'),
+      frostite: deriveSeed(this.seed, 'ore.frostite'),
+      magmite: deriveSeed(this.seed, 'ore.magmite'),
+      crystal: deriveSeed(this.seed, 'ore.crystal'),
+      peaks: deriveSeed(this.seed, 'terrain.peaks'),
+      tundra: deriveSeed(this.seed, 'terrain.tundra'),
+      lava: deriveSeed(this.seed, 'lava.pools'),
     };
     this.spawnTileX = Math.floor(this.widthTiles / 2);
 
@@ -95,23 +145,107 @@ export class OverworldGenerator implements WorldGenerator {
     for (let dx = -12; dx <= 12; dx++) acc += natural(this.spawnTileX + dx);
     this.spawnGroundY = Math.round(acc / 25);
 
+    this.base = base;
+    this.seaLevel = base + SEA_LEVEL_OFFSET;
     this.surface = new Int16Array(this.widthTiles);
     this.dirtDepth = new Int8Array(this.widthTiles);
-    const margin = 8;
+    this.biome = new Uint8Array(this.widthTiles);
+    this.liquidTop = new Int16Array(this.widthTiles).fill(-1);
+    this.liquidKind = new Uint8Array(this.widthTiles);
     for (let x = 0; x < this.widthTiles; x++) {
-      let h = natural(x);
+      let h = this.shapeBiomes(x, natural(x));
       for (const shape of this.zone.shapes) h = this.applyShape(h, x, shape);
       this.surface[x] = clamp(Math.round(h), 40, this.heightTiles - 64);
       this.dirtDepth[x] = 9 + Math.round(fbm1D(x / 40, this.seeds.strata, { octaves: 2 }) * 4);
-      // Raise the world rim so the edges read as natural walls rather than an abrupt void.
-      if (x < margin || x >= this.widthTiles - margin) this.surface[x] = (this.surface[x] ?? 0) - 6;
+      this.biome[x] = BIOME_INDEX.indexOf(biomeAt(x, this.spawnTileX).id);
     }
+    this.planWaters();
 
     this.treeExclusions = this.zone.treeExclusions.map(
       ([a, b]) => [a + this.spawnTileX, b + this.spawnTileX] as const,
     );
     this.planStartZone();
     this.planRandomFeatures();
+  }
+
+  /** Biome of a column. */
+  biomeOf(tileX: number): BiomeId {
+    const x = clamp(Math.floor(tileX), 0, this.widthTiles - 1);
+    return BIOME_INDEX[this.biome[x] ?? 3] ?? 'meadow';
+  }
+
+  /** Terrain height reshaped by the biomes (rows: smaller is higher). */
+  private shapeBiomes(x: number, h: number): number {
+    const sx = this.spawnTileX;
+    const rel = x - sx;
+    const wm = biomeWeight(x, sx, 'mountains', 40);
+    if (wm > 0) {
+      const ridge = 1 - Math.abs(fbm1D(x / 38, this.seeds.peaks, { octaves: 3 }));
+      h -= wm * (16 + ridge * ridge * 64);
+    }
+    const wt = biomeWeight(x, sx, 'tundra', 30);
+    if (wt > 0) h -= wt * (5 + fbm1D(x / 26, this.seeds.tundra, { octaves: 2 }) * 9);
+    const wv = biomeWeight(x, sx, 'volcano', 30);
+    if (wv > 0) {
+      h -= wv * 4;
+      const d = Math.abs(rel - LANDMARKS.volcano);
+      if (d < 72) {
+        let cone = (1 - d / 72) ** 1.35 * 78;
+        if (d < 10) cone -= (1 - d / 10) * 20; // the crater
+        h -= cone * wv;
+      }
+    }
+    // Coasts slope down into the seas at both edges.
+    const west = BIOME_DEFS.find((d) => d.region === 'west_coast');
+    const east = BIOME_DEFS.find((d) => d.region === 'east_coast');
+    const into = Math.max(west ? west.toX - rel : -1, east ? rel - east.fromX : -1);
+    if (into > 0) {
+      const seabed =
+        this.seaLevel + 2 + Math.min(20, into * 0.35) + fbm1D(x / 20, this.seeds.terrainC) * 2;
+      h = lerp(h, seabed, smoothstep(0, 40, into));
+    }
+    return h;
+  }
+
+  /** Seas, lakes, the frozen lake and the crater's lava: which rows of which columns hold liquid. */
+  private planWaters(): void {
+    const sx = this.spawnTileX;
+    const fill = (x: number, top: number, kind: number): void => {
+      if (x < 0 || x >= this.widthTiles) return;
+      if ((this.surface[x] ?? 0) > top) {
+        this.liquidTop[x] = top;
+        this.liquidKind[x] = kind;
+      }
+    };
+    // Seas.
+    for (let x = 0; x < this.widthTiles; x++) {
+      const id = this.biomeOf(x);
+      if (id === 'ocean' || id === 'beach') fill(x, this.seaLevel, LIQ_WATER);
+    }
+    // Lakes: carve a bowl, fill to the lower rim.
+    const lake = (c: number, w: number, depth: number, kind: number): void => {
+      const half = Math.floor(w / 2);
+      const L = sx + c - half;
+      const R = sx + c + half;
+      const top = Math.max(this.surface[L - 1] ?? 0, this.surface[R + 1] ?? 0);
+      for (let x = L; x <= R; x++) {
+        const u = (x - (sx + c)) / half;
+        const bottom = top + Math.max(1, Math.round(depth * (1 - u * u)));
+        this.surface[x] = Math.max(this.surface[x] ?? 0, bottom);
+        fill(x, top, kind);
+      }
+    };
+    for (const [c, w, d] of LANDMARKS.lakes) lake(c, w, d, LIQ_WATER);
+    const [fc, fw, fd] = LANDMARKS.frozenLake;
+    lake(fc, fw, fd, LIQ_FROZEN);
+    // Volcano crater: a bowl carved below the lower rim, filled with lava up to just under it.
+    const vc = sx + LANDMARKS.volcano;
+    const rim = Math.max(this.surface[vc - 11] ?? 0, this.surface[vc + 11] ?? 0);
+    for (let x = vc - 10; x <= vc + 10; x++) {
+      const u = (x - vc) / 10;
+      this.surface[x] = Math.max(this.surface[x] ?? 0, rim + 3 + Math.round(5 * (1 - u * u)));
+      fill(x, rim + 1, LIQ_LAVA);
+    }
   }
 
   surfaceY(tileX: number): number {
@@ -167,6 +301,9 @@ export class OverworldGenerator implements WorldGenerator {
       const roll = rng.next();
       const cx = x0 + rng.int(8, segment - 8);
       if (Math.abs(cx - this.spawnTileX) < this.zone.radius) continue;
+      const featureBiome = this.biomeOf(cx);
+      if (featureBiome === 'ocean' || featureBiome === 'beach') continue;
+      if (Math.abs(cx - this.spawnTileX - LANDMARKS.volcano) < 80) continue;
       const ground = this.minSurface(cx - 8, cx + 8);
       if (roll < 0.38) {
         const w = rng.int(7, 13);
@@ -213,34 +350,36 @@ export class OverworldGenerator implements WorldGenerator {
       const tx = tx0 + lx;
       const s = this.surface[tx] ?? 0;
       const dirtBottom = s + (this.dirtDepth[tx] ?? 9);
+      const biome = BIOME_INDEX[this.biome[tx] ?? 3] ?? 'meadow';
+      const liqTop = this.liquidTop[tx] ?? -1;
+      const liqKind = this.liquidKind[tx] ?? LIQ_NONE;
+      const steep = Math.abs((this.surface[tx + 1] ?? s) - (this.surface[tx - 1] ?? s)) > 3;
       for (let ly = 0; ly < CHUNK_SIZE; ly++) {
         const ty = ty0 + ly;
         const i = localIndex(lx, ly);
-        if (ty < s) continue;
-        let tile: number;
-        if (ty === s) {
-          tile = TILE.grass;
-        } else if (ty < dirtBottom) {
-          // Dirt band with occasional stone boulders.
-          tile =
-            fbm2D(tx / 9, ty / 9, this.seeds.blobs, { octaves: 2 }) > 0.42 ? TILE.stone : TILE.dirt;
-        } else {
-          // Stone layer with dirt pockets; slightly irregular boundary.
-          const edge = fbm2D(tx / 6, ty / 6, this.seeds.strata, { octaves: 2 });
-          if (ty < dirtBottom + 2 && edge > 0.1) tile = TILE.dirt;
-          else if (fbm2D(tx / 14, ty / 11, this.seeds.blobs + 99, { octaves: 2 }) < -0.48)
-            tile = TILE.dirt;
-          else tile = TILE.stone;
+        if (ty < s) {
+          if (liqTop >= 0 && ty >= liqTop) {
+            fg[i] =
+              liqKind === LIQ_LAVA
+                ? TILE.lava
+                : liqKind === LIQ_FROZEN && ty === liqTop
+                  ? TILE.ice
+                  : TILE.water;
+          }
+          continue;
         }
+        // Underground, biome materials blend along a ragged border instead of a straight line.
+        const jitter =
+          depth0(ty, s) > 3
+            ? Math.round(fbm2D(tx / 18, ty / 18, this.seeds.strata + 5, { octaves: 2 }) * 14)
+            : 0;
+        const matBiome =
+          jitter === 0
+            ? biome
+            : (BIOME_INDEX[this.biome[clamp(tx + jitter, 0, this.widthTiles - 1)] ?? 3] ?? biome);
+        let tile = this.material(matBiome, tx, ty, s, dirtBottom, steep);
         const depth = ty - s;
-        // Ore veins.
-        if (depth > 6 && (tile === TILE.stone || (tile === TILE.dirt && depth > 10))) {
-          if (fbm2D(tx / 4.2, ty / 4.2, this.seeds.copper, { octaves: 2 }) > 0.44)
-            tile = TILE.copperOre;
-        }
-        if (depth > 30 && tile === TILE.stone) {
-          if (fbm2D(tx / 3.8, ty / 3.8, this.seeds.iron, { octaves: 2 }) > 0.5) tile = TILE.ironOre;
-        }
+        tile = this.ore(biome, tile, tx, ty, depth);
         // Caves: thin worm tunnels (ridged noise) and large caverns deeper down.
         const caveTop = Math.abs(tx - this.spawnTileX) < this.zone.radius ? 24 : 12;
         if (depth > caveTop) {
@@ -249,10 +388,24 @@ export class OverworldGenerator implements WorldGenerator {
           const tunnel = Math.abs(n) < 0.05 + widen;
           const cavern =
             depth > 48 && fbm2D(tx / 52, ty / 30, this.seeds.cavern, { octaves: 2 }) > 0.58;
-          if (tunnel || cavern) tile = 0;
+          if (tunnel || cavern) {
+            // Under the volcano the low parts of caves hold lava.
+            tile =
+              biome === 'volcano' &&
+              depth > 40 &&
+              fbm2D(tx / 24, ty / 10, this.seeds.lava, { octaves: 2 }) > 0.22
+                ? TILE.lava
+                : 0;
+          }
         }
         fg[i] = tile;
-        if (ty >= s + 3) bg[i] = ty < dirtBottom ? TILE.dirtWall : TILE.stoneWall;
+        if (ty >= s + 3) {
+          const shallow = ty < dirtBottom;
+          bg[i] =
+            shallow && biome !== 'volcano' && biome !== 'mountains'
+              ? TILE.dirtWall
+              : TILE.stoneWall;
+        }
       }
     }
 
@@ -280,6 +433,76 @@ export class OverworldGenerator implements WorldGenerator {
     }
   }
 
+  /** Terrain material of a solid tile, by biome and depth. */
+  private material(
+    biome: BiomeId,
+    tx: number,
+    ty: number,
+    s: number,
+    dirtBottom: number,
+    steep: boolean,
+  ): number {
+    const blob = (sx: number, sy: number, seed: number, t: number): boolean =>
+      fbm2D(tx / sx, ty / sy, seed, { octaves: 2 }) > t;
+    const deepStone = (): number => {
+      const edge = fbm2D(tx / 6, ty / 6, this.seeds.strata, { octaves: 2 });
+      if (ty < dirtBottom + 2 && edge > 0.1) return TILE.dirt;
+      if (fbm2D(tx / 14, ty / 11, this.seeds.blobs + 99, { octaves: 2 }) < -0.48) return TILE.dirt;
+      return TILE.stone;
+    };
+    switch (biome) {
+      case 'ocean':
+      case 'beach':
+        if (ty < s + 5) return TILE.sand;
+        if (ty < dirtBottom + 2) return TILE.sandstone;
+        return TILE.stone;
+      case 'tundra':
+        if (ty <= s + 3) return TILE.snow;
+        if (ty < dirtBottom) return blob(9, 9, this.seeds.blobs, 0.42) ? TILE.stone : TILE.dirt;
+        if (blob(11, 7, this.seeds.tundra + 7, 0.45)) return TILE.ice;
+        return deepStone();
+      case 'mountains': {
+        const high = s < this.base - 34;
+        if (ty === s) return high ? TILE.snow : steep ? TILE.stone : TILE.grass;
+        if (high && ty === s + 1 && !steep) return TILE.snow;
+        if (ty < s + 3 && !steep && !high) return TILE.dirt;
+        return deepStone();
+      }
+      case 'volcano':
+        if (ty < s + 4) return TILE.ash;
+        if (blob(10, 8, this.seeds.blobs + 31, 0.5)) return TILE.obsidian;
+        return TILE.basalt;
+      default:
+        if (ty === s) return TILE.grass;
+        if (ty < dirtBottom) return blob(9, 9, this.seeds.blobs, 0.42) ? TILE.stone : TILE.dirt;
+        return deepStone();
+    }
+  }
+
+  /** Ore veins replacing rock (and some dirt) by depth and biome. */
+  private ore(biome: BiomeId, tile: number, tx: number, ty: number, depth: number): number {
+    const rock = tile === TILE.stone || tile === TILE.basalt || tile === TILE.sandstone;
+    const vein = (scale: number, seed: number, t: number): boolean =>
+      fbm2D(tx / scale, ty / scale, seed, { octaves: 2 }) > t;
+    if (depth > 6 && (rock || (tile === TILE.dirt && depth > 10)) && biome !== 'volcano') {
+      if (vein(4.2, this.seeds.copper, 0.44)) return TILE.copperOre;
+    }
+    if (!rock) return tile;
+    if (depth > 30 && biome !== 'volcano' && vein(3.8, this.seeds.iron, 0.5)) return TILE.ironOre;
+    if (depth > 45 && vein(3.4, this.seeds.silver, 0.56)) return TILE.silverOre;
+    if (depth > 70 && vein(3.2, this.seeds.gold, 0.6)) return TILE.goldOre;
+    if (
+      depth > 30 &&
+      (biome === 'tundra' || biome === 'mountains') &&
+      vein(3.6, this.seeds.frostite, 0.55)
+    )
+      return TILE.frostiteOre;
+    if (depth > 26 && biome === 'volcano' && vein(3.6, this.seeds.magmite, 0.52))
+      return TILE.magmiteOre;
+    if (depth > 110 && vein(3, this.seeds.crystal, 0.62)) return TILE.crystalOre;
+    return tile;
+  }
+
   generateObjects(cx: number, cy: number, tiles: TileReader): WorldObject[] {
     const out: WorldObject[] = [];
     const tx0 = cx * CHUNK_SIZE;
@@ -293,15 +516,16 @@ export class OverworldGenerator implements WorldGenerator {
       if (!this.isTreeCandidate(tx)) continue;
       for (let ly = 0; ly < CHUNK_SIZE; ly++) {
         const ty = ty0 + ly;
-        if (!this.isGrassTop(tiles, tx, ty + 1)) continue;
-        if (!this.isGrassTop(tiles, tx - 1, ty + 1) || !this.isGrassTop(tiles, tx + 1, ty + 1))
+        if (!this.isTreeTop(tiles, tx, ty + 1)) continue;
+        if (!this.isTreeTop(tiles, tx - 1, ty + 1) || !this.isTreeTop(tiles, tx + 1, ty + 1))
           continue;
         let clear = true;
         for (let k = 1; k <= TREE_CLEARANCE && clear; k++) {
           for (let dx = -1; dx <= 1; dx++) if (tiles.getFg(tx + dx, ty - k) !== 0) clear = false;
         }
         if (!clear) continue;
-        const pine = hash2f(tx, 7, seed) < 0.3;
+        const snowy = tiles.getFg(tx, ty + 1) === TILE.snow;
+        const pine = snowy || hash2f(tx, 7, seed) < 0.3;
         const key = pine ? 'tree_pine' : 'tree_oak';
         out.push(this.makeObject(key, tx, ty));
         treeColumns.add(tx);
@@ -318,8 +542,16 @@ export class OverworldGenerator implements WorldGenerator {
           out.push(this.makeObject(prop, tx, ty));
           continue;
         }
-        if (treeColumns.has(tx) || !this.isGrassTop(tiles, tx, ty + 1)) continue;
+        if (treeColumns.has(tx)) continue;
         if (tiles.getFg(tx, ty) !== 0) continue;
+        if (!this.isGrassTop(tiles, tx, ty + 1)) {
+          // Bare biomes (snow, sand, ash) get the odd rock.
+          const top = tiles.getFg(tx, ty + 1);
+          const bare = top === TILE.snow || top === TILE.sand || top === TILE.ash;
+          if (bare && tiles.getFg(tx, ty) === 0 && hash2f(tx, ty, seed + 3) < 0.04)
+            out.push(this.makeObject('rock', tx, ty));
+          continue;
+        }
         if (this.nearProp(tx, ty)) continue;
         const r = hash2f(tx, ty, seed);
         const nearTree = treeColumns.has(tx - 1) || treeColumns.has(tx + 1);
@@ -347,6 +579,11 @@ export class OverworldGenerator implements WorldGenerator {
       ty,
       seed: h,
     };
+  }
+
+  private isTreeTop(tiles: TileReader, tx: number, ty: number): boolean {
+    const t = tiles.getFg(tx, ty);
+    return (t === TILE.grass || t === TILE.snow) && tiles.getFg(tx, ty - 1) === 0;
   }
 
   private isGrassTop(tiles: TileReader, tx: number, ty: number): boolean {

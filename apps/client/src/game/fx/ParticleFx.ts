@@ -15,7 +15,10 @@ export class ParticleFx {
   private readonly fireflies: Emitter;
   private readonly embers: Emitter;
   private readonly debrisEmitter: Emitter;
+  private readonly snow: Emitter;
+  private readonly ash: Emitter;
   private readonly rng = new Rng(77);
+  private weatherAcc = 0;
   private runTimer = 0;
   private leafTimer = 0;
   private flyTimer = 0;
@@ -60,7 +63,30 @@ export class ParticleFx {
       emitting: false,
     });
     this.debrisEmitter.setDepth(23);
-    worldLayer.add([this.dust, this.leaves, this.debrisEmitter]);
+    // Weather: snowflakes drift down with a sway; ash flakes sink slowly, embers rise.
+    this.snow = new P(scene, 0, 0, TEX.fx, {
+      frame: 'pixel',
+      lifespan: { min: 5000, max: 8000 },
+      speedX: { min: -14, max: 6 },
+      speedY: { min: 18, max: 34 },
+      scale: { min: 1, max: 2 },
+      alpha: { start: 0.95, end: 0.4 },
+      tint: 0xffffff,
+      emitting: false,
+    });
+    this.snow.setDepth(45);
+    this.ash = new P(scene, 0, 0, TEX.fx, {
+      frame: 'pixel',
+      lifespan: { min: 5000, max: 8000 },
+      speedX: { min: -8, max: 10 },
+      speedY: { min: 6, max: 16 },
+      scale: { min: 1, max: 2 },
+      alpha: { start: 0.8, end: 0.2 },
+      tint: [0x6a6266, 0x8a8286, 0x4e484a],
+      emitting: false,
+    });
+    this.ash.setDepth(45);
+    worldLayer.add([this.dust, this.leaves, this.debrisEmitter, this.snow, this.ash]);
 
     this.fireflies = new P(scene, 0, 0, TEX.fx, {
       frame: 'firefly',
@@ -86,6 +112,26 @@ export class ParticleFx {
       emitting: false,
     });
     overlayLayer.add([this.fireflies, this.embers]);
+  }
+
+  /**
+   * Weather over the view: snowfall in the frost plains and on the peaks, ash and rising embers
+   * over the volcano. `intensity` 0..1 fades it at biome borders; nothing falls underground.
+   */
+  weather(dt: number, view: ViewRect, kind: 'none' | 'snow' | 'ash', intensity: number): void {
+    if (kind === 'none' || intensity <= 0.02) return;
+    this.weatherAcc += dt * intensity * (kind === 'snow' ? 70 : 40);
+    while (this.weatherAcc >= 1) {
+      this.weatherAcc -= 1;
+      const x = view.left + this.rng.range(-40, view.width + 40);
+      const y = view.top + this.rng.range(-20, view.height * 0.35);
+      if (kind === 'snow') this.snow.emitParticleAt(x, y, 1);
+      else {
+        this.ash.emitParticleAt(x, y, 1);
+        if (this.rng.chance(0.12))
+          this.embers.emitParticleAt(x, view.top + view.height * this.rng.range(0.6, 1), 1);
+      }
+    }
   }
 
   /** Tile- or object-colored debris burst (mining, chopping, breaking). */

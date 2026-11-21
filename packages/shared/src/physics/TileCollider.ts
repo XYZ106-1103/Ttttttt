@@ -4,6 +4,8 @@ import { COLLISION_PLATFORM, COLLISION_SOLID, type CollisionCode } from '../worl
 /** Anything that can answer "what collision does this tile have?" (the World, or a test grid). */
 export interface CollisionGrid {
   collisionAt(tx: number, ty: number): CollisionCode;
+  /** Liquid at a tile (0 none, 1 water, 2 lava); grids without liquids omit it. */
+  liquidAt?(tx: number, ty: number): number;
 }
 
 /**

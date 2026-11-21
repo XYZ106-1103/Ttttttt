@@ -61,12 +61,17 @@ export class NavGrid {
     return Math.floor(key / this.world.widthTiles);
   }
 
+  /** Space a body can occupy (lava never: paths keep out of it). */
   private free(tx: number, ty: number): boolean {
-    return this.world.collisionAt(tx, ty) !== COLLISION_SOLID;
+    return (
+      this.world.collisionAt(tx, ty) !== COLLISION_SOLID &&
+      (this.world.liquidAt?.(tx, ty) ?? 0) !== 2
+    );
   }
 
+  /** Something to stand on; water counts (adventurers swim across lakes along the surface). */
   private floor(tx: number, ty: number): boolean {
-    return this.world.collisionAt(tx, ty) !== COLLISION_NONE;
+    return this.world.collisionAt(tx, ty) !== COLLISION_NONE || this.world.liquidAt?.(tx, ty) === 1;
   }
 
   /** Body fits in column tx with feet on top of row ty + 1. */

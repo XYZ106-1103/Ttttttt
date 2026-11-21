@@ -6,6 +6,9 @@ export const COLLISION_SOLID = 1;
 export const COLLISION_PLATFORM = 2;
 export type CollisionCode = 0 | 1 | 2;
 
+export const LIQUID_WATER = 1;
+export const LIQUID_LAVA = 2;
+
 function collisionCode(c: TileCollision): CollisionCode {
   return c === 'solid' ? COLLISION_SOLID : c === 'platform' ? COLLISION_PLATFORM : COLLISION_NONE;
 }
@@ -20,6 +23,8 @@ export class TileRegistry {
   readonly lightPass = new Float32Array(MAX_TILE_ID);
   /** Merge group index per tile id (0 = none). */
   readonly mergeGroup = new Uint8Array(MAX_TILE_ID);
+  /** Liquid per tile id: 0 none, 1 water, 2 lava. */
+  readonly liquid = new Uint8Array(MAX_TILE_ID);
   private readonly byKey = new Map<string, TileDef>();
 
   constructor(defs: readonly TileDef[] = TILE_DEFS) {
@@ -33,6 +38,8 @@ export class TileRegistry {
       this.byKey.set(def.key, def);
       this.collision[def.id] = collisionCode(def.collision);
       this.lightPass[def.id] = def.lightPass;
+      this.liquid[def.id] =
+        def.liquid === 'water' ? LIQUID_WATER : def.liquid === 'lava' ? LIQUID_LAVA : 0;
       if (!groups.has(def.mergeGroup)) groups.set(def.mergeGroup, groups.size);
       this.mergeGroup[def.id] = groups.get(def.mergeGroup) ?? 0;
     }
@@ -82,4 +89,18 @@ export const TILE = {
   ironOre: tileRegistry.idOf('iron_ore'),
   torch: tileRegistry.idOf('torch'),
   stoneBricks: tileRegistry.idOf('stone_bricks'),
+  snow: tileRegistry.idOf('snow'),
+  ice: tileRegistry.idOf('ice'),
+  sand: tileRegistry.idOf('sand'),
+  sandstone: tileRegistry.idOf('sandstone'),
+  ash: tileRegistry.idOf('ash'),
+  basalt: tileRegistry.idOf('basalt'),
+  obsidian: tileRegistry.idOf('obsidian'),
+  water: tileRegistry.idOf('water'),
+  lava: tileRegistry.idOf('lava'),
+  silverOre: tileRegistry.idOf('silver_ore'),
+  goldOre: tileRegistry.idOf('gold_ore'),
+  frostiteOre: tileRegistry.idOf('frostite_ore'),
+  magmiteOre: tileRegistry.idOf('magmite_ore'),
+  crystalOre: tileRegistry.idOf('crystal_ore'),
 } as const;

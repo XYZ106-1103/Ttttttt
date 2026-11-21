@@ -20,6 +20,12 @@ const METALS: Record<string, Color[]> = {
   worn: ['#3d4250', '#6a7182', '#9aa1b0', '#c8cdd6'].map((c) => hex(c)),
   copper: ['#5a2a14', '#a4532a', '#d9803f', '#f6b871'].map((c) => hex(c)),
   iron: ['#3a3f4f', '#8790a6', '#c3cbda', '#f2f5fa'].map((c) => hex(c)),
+  silver: ['#4a5260', '#a8b4c4', '#dfe6f0', '#ffffff'].map((c) => hex(c)),
+  gold: ['#5a3a08', '#c8901c', '#f2c84b', '#fff2a8'].map((c) => hex(c)),
+  frostite: ['#1a3a5a', '#3a9ad4', '#6fd4ff', '#d4f6ff'].map((c) => hex(c)),
+  magmite: ['#5a1a08', '#c84a14', '#ff7a3a', '#ffd08a'].map((c) => hex(c)),
+  crystal: ['#3a1a5a', '#8a4ad4', '#c58cff', '#f4e0ff'].map((c) => hex(c)),
+  obsidian: ['#120c1c', '#281c44', '#4a3a7a', '#8a7ac4'].map((c) => hex(c)),
 };
 
 function outlined(pc: PixelCanvas): PixelCanvas {
@@ -171,6 +177,8 @@ export function generateItemIcons(ts: Tileset): Map<string, PixelCanvas> {
     else if (def.id === 'mushroom') icon = centered(generateMushroom(0));
     else if (def.id === 'copper_ore') icon = oreChunk(METALS.copper ?? []);
     else if (def.id === 'iron_ore') icon = oreChunk(METALS.iron ?? []);
+    else if (def.id.endsWith('_ore') && METALS[metalKey]) icon = oreChunk(METALS[metalKey] ?? []);
+    else if (def.id === 'crystal_shard') icon = oreChunk(METALS.crystal ?? []);
     else {
       icon = new PixelCanvas(S, S);
       icon.fillRect(4, 4, 8, 8, mix(hex('#ff00ff'), shade(hex('#ff00ff'), -0.4), 0.5));

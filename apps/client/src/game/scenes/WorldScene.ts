@@ -7,6 +7,7 @@ import {
   type MotorInput,
   PLACE_SPEED,
   regionAt,
+  biomeAt,
   seedFromString,
   SIM_DT,
   TILE_SIZE,
@@ -857,7 +858,9 @@ export class WorldScene extends Phaser.Scene {
     this.torches.update(this.elapsed);
     this.drops.update(this.sim.drops, this.elapsed);
     if (playing) this.combatView.update(dt, a, this.zoom);
-    const sky = this.parallax.update(view, this.sim.clock.timeOfDay, dt, this.elapsed);
+    const look = this.biomeLook(view);
+    const sky = this.parallax.update(view, this.sim.clock.timeOfDay, dt, this.elapsed, look.grade);
+    this.fx.weather(dt, view, look.weather, look.intensity);
     const lights: PointLight[] = [];
     const fires: { x: number; y: number }[] = [];
     for (const l of this.objects.lights()) {
@@ -957,6 +960,43 @@ export class WorldScene extends Phaser.Scene {
     const cx1 = Math.floor((view.left + view.width) / CHUNK_PIXELS) + RESIDENT_MARGIN;
     const cy1 = Math.floor((view.top + view.height) / CHUNK_PIXELS) + RESIDENT_MARGIN;
     this.sim.world.evictOutside(cx0, cy0, cx1, cy1);
+  }
+
+  /** Biome color grade and weather for the view (blended across nearby biomes). */
+  private biomeLook(view: ViewRect): {
+    grade: [number, number, number];
+    weather: 'none' | 'snow' | 'ash';
+    intensity: number;
+  } {
+    const w = this.sim.world;
+    const sx = w.generator.spawnTileX;
+    const cx = Math.floor((view.left + view.width / 2) / TILE_SIZE);
+    const cy = Math.floor((view.top + view.height / 2) / TILE_SIZE);
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let snow = 0;
+    let ash = 0;
+    const n = 9;
+    for (let k = -4; k <= 4; k++) {
+      const d = biomeAt(cx + k * 10, sx);
+      const a = d.tint[3];
+      r += 1 + (d.tint[0] - 1) * a;
+      g += 1 + (d.tint[1] - 1) * a;
+      b += 1 + (d.tint[2] - 1) * a;
+      if (d.weather === 'snow') snow++;
+      if (d.weather === 'ash') ash++;
+    }
+    const surface = w.surfaceY(cx);
+    // Snow also falls high on the peaks.
+    if (biomeAt(cx, sx).id === 'mountains' && surface < w.heightTiles * 0.3) snow += 5;
+    const underground = cy - surface > 6;
+    const kind = snow >= ash ? (snow > 0 ? 'snow' : 'none') : 'ash';
+    return {
+      grade: [r / n, g / n, b / n],
+      weather: kind,
+      intensity: underground ? 0 : Math.min(1, Math.max(snow, ash) / n),
+    };
   }
 
   private treeTops(view: ViewRect): { x: number; y: number }[] {

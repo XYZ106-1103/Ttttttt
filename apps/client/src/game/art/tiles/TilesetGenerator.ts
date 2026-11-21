@@ -1,5 +1,5 @@
 import { hash2, hash2f, Rng, type TileRegistry } from '@world/shared';
-import { type Color, hex, mix, shade, TRANSPARENT } from '../color';
+import { type Color, hex, mix, shade, TRANSPARENT, withAlpha } from '../color';
 import { PixelCanvas } from '../PixelCanvas';
 import { TILE_RECIPES, type TileRecipe } from './tileArt';
 
@@ -394,6 +394,50 @@ function beamFrame(pc: PixelCanvas, mask: number, pal: Pal, outline: Color, seed
   for (let x = x0; x < x0 + w; x++) pc.set(x, 9, mix(pal[0] ?? 0, hex('#5a5f70'), 0.6));
 }
 
+/** Snow: soft drifts with a bright crust and sparkles where exposed to the sky. */
+function snowBase(pc: PixelCanvas, mask: number, pal: Pal, seed: number): void {
+  for (let y = 0; y < T; y++)
+    for (let x = 0; x < T; x++) {
+      const n = smoothNoise(x, y, seed, 8) * 0.6 + smoothNoise(x, y, seed + 4, 4) * 0.4;
+      let c = n < -0.35 ? pal[1] : n > 0.3 ? pal[3] : pal[2];
+      if (hash2f(x, y, seed + 9) > 0.97) c = pal[4];
+      pc.set(x, y, c ?? 0);
+    }
+  if (!(mask & MASK_N))
+    for (let x = 0; x < T; x++) {
+      pc.set(x, 0, pal[4] ?? 0);
+      pc.set(x, 1, pal[4] ?? 0);
+      if (hash2(x, 1, seed) % 3 === 0) pc.set(x, 2, pal[3] ?? 0);
+    }
+}
+
+/** Ice: smooth translucent-looking bands with diagonal glints. */
+function iceBase(pc: PixelCanvas, pal: Pal, seed: number): void {
+  for (let y = 0; y < T; y++)
+    for (let x = 0; x < T; x++) {
+      const band = smoothNoise(x * 0.5, y, seed, 8);
+      let c = band > 0.25 ? pal[3] : band < -0.3 ? pal[1] : pal[2];
+      if ((x + y + (hash2(0, y >> 2, seed) % 5)) % 11 === 0) c = pal[4];
+      pc.set(x, y, c ?? 0);
+    }
+}
+
+/** Liquid: semi-transparent body, a bright surface line where nothing liquid is above. */
+function liquidBase(pc: PixelCanvas, mask: number, pal: Pal, a: number, seed: number): void {
+  for (let y = 0; y < T; y++)
+    for (let x = 0; x < T; x++) {
+      const n = smoothNoise(x, y, seed, 8);
+      const c = n > 0.35 ? pal[3] : n < -0.4 ? pal[1] : pal[2];
+      pc.set(x, y, withAlpha(c ?? 0, a));
+    }
+  if (!(mask & MASK_N))
+    for (let x = 0; x < T; x++) {
+      pc.set(x, 0, withAlpha(pal[4] ?? 0, Math.min(255, a + 60)));
+      pc.set(x, 1, withAlpha(pal[3] ?? 0, a));
+      if (hash2(x, 2, seed) % 4 === 0) pc.set(x, 2, withAlpha(pal[4] ?? 0, a));
+    }
+}
+
 function generateFrame(
   recipe: TileRecipe,
   mask: number,
@@ -449,6 +493,17 @@ function generateFrame(
       break;
     case 'beam':
       beamFrame(pc, mask, pal, outline, vseed);
+      break;
+    case 'snow':
+      snowBase(pc, mask, pal, vseed);
+      applyEdges(pc, mask, pal, outline, true);
+      break;
+    case 'ice':
+      iceBase(pc, pal, vseed);
+      applyEdges(pc, mask, pal, outline);
+      break;
+    case 'liquid':
+      liquidBase(pc, mask, pal, recipe.alpha ?? 180, vseed);
       break;
   }
   return pc;

@@ -372,6 +372,36 @@ export class CombatWorld {
     return true;
   }
 
+  /** Damage from the world itself (lava): no attacker, no defense, optional status. */
+  environmentDamage(target: Combatant, amount: number, now: number, status?: string): void {
+    if (!target.alive || amount <= 0) return;
+    const b = target.body;
+    target.hp = Math.max(0, target.hp - amount);
+    target.lastHitAt = now;
+    if (status && !target.immune.has(status)) {
+      const ok = target.statuses.apply(status, now, 3, {
+        power: Math.max(1, amount),
+        sourceId: -1,
+        immune: target.immune,
+      });
+      if (ok) this.events.push({ type: 'status', targetId: target.id, status });
+    }
+    this.events.push({
+      type: 'damage',
+      targetId: target.id,
+      attackerId: -1,
+      amount: Math.round(amount),
+      crit: false,
+      x: b.x,
+      y: b.y - b.height,
+      dirX: 0,
+      hitstop: 0,
+      source: 'dot',
+      tag: 'lava',
+    });
+    if (target.hp <= 0) this.kill(target, -1);
+  }
+
   heal(target: Combatant, amount: number, mana = false): void {
     if (!target.alive || amount <= 0) return;
     const b = target.body;

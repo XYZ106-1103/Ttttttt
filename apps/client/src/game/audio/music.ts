@@ -8,7 +8,7 @@
 import { Rng } from '@world/shared';
 import { mtof, noise, type Out, tone } from './synth';
 
-export type ThemeId = 'title' | 'day' | 'night' | 'cave' | 'town' | 'boss';
+export type ThemeId = 'title' | 'day' | 'night' | 'cave' | 'town' | 'boss' | 'snow' | 'volcano';
 
 interface Instrument {
   readonly type: OscillatorType;
@@ -123,6 +123,35 @@ export const THEMES: Readonly<Record<ThemeId, Theme>> = {
       hat: p('x.x.x.x.x.x.x.x.'),
     },
     echo: 0.2,
+  },
+  snow: {
+    id: 'snow',
+    bpm: 76,
+    root: 54,
+    scale: LYDIAN,
+    progression: [0, 4, 3, 0, 5, 4, 1, 4],
+    pad: { type: 'triangle', gain: 0.045, lp: 1600, attack: 1.4 },
+    bass: { type: 'sine', gain: 0.12, lp: 500, steps: p('x.......x.......') },
+    lead: { type: 'sine', gain: 0.07, lp: 3600, density: 0.3, octave: 2, vibrato: 2 },
+    arp: { type: 'triangle', gain: 0.025, lp: 4200, steps: p('x..x..x..x..x...') },
+    echo: 0.6,
+  },
+  volcano: {
+    id: 'volcano',
+    bpm: 92,
+    root: 50,
+    scale: PHRYGIAN,
+    progression: [0, 1, 0, 6, 0, 1, 5, 6],
+    pad: { type: 'sawtooth', gain: 0.045, lp: 700, attack: 0.6 },
+    bass: { type: 'sawtooth', gain: 0.1, lp: 600, steps: p('x..x..x.x..x..x.') },
+    lead: { type: 'square', gain: 0.03, lp: 1800, density: 0.35, octave: 2 },
+    drums: {
+      gain: 0.5,
+      kick: p('x.....x...x.....'),
+      snare: p('....x.......x...'),
+      hat: p('..x...x...x...x.'),
+    },
+    echo: 0.3,
   },
   boss: {
     id: 'boss',

@@ -159,6 +159,103 @@ export class World implements TileReader {
     return (this.tiles.collision[this.getFg(tx, ty)] ?? COLLISION_NONE) as CollisionCode;
   }
 
+  /** Liquid at a tile: 0 none, LIQUID_WATER, LIQUID_LAVA. */
+  liquidAt(tx: number, ty: number): number {
+    if (tx < 0 || tx >= this.widthTiles || ty < 0 || ty >= this.heightTiles) return 0;
+    return this.tiles.liquid[this.getFg(tx, ty)] ?? 0;
+  }
+
+  /** Foreground tile of a loaded chunk only (-1 if not loaded): liquids never generate terrain. */
+  private fgLoaded(tx: number, ty: number): number {
+    if (tx < 0 || tx >= this.widthTiles || ty < 0 || ty >= this.heightTiles) return -1;
+    const chunk = this.peekChunk(tileToChunk(tx), tileToChunk(ty));
+    return chunk ? (chunk.fg[localIndex(tileToLocal(tx), tileToLocal(ty))] ?? 0) : -1;
+  }
+
+  /** Liquid tiles that may move (woken by changes next to them). */
+  private readonly liquidActive = new Set<number>();
+  private liquidParity = 0;
+
+  private wakeLiquids(tx: number, ty: number): void {
+    for (const [dx, dy] of [
+      [0, 0],
+      [0, -1],
+      [-1, 0],
+      [1, 0],
+      [0, 1],
+      [-1, -1],
+      [1, -1],
+    ] as const) {
+      const t = this.fgLoaded(tx + dx, ty + dy);
+      if (t > 0 && (this.tiles.liquid[t] ?? 0) !== 0)
+        this.liquidActive.add((ty + dy) * this.widthTiles + tx + dx);
+    }
+  }
+
+  /** Liquids waiting to move (diagnostics, tests). */
+  get activeLiquids(): number {
+    return this.liquidActive.size;
+  }
+
+  /**
+   * Let woken liquid settle by one step: a liquid tile falls into air below it, or slips off a
+   * ledge diagonally; water meeting lava turns the lava to obsidian. At most `max` tiles move per
+   * call, and only inside loaded chunks. Untouched lakes and seas stay as generated.
+   */
+  stepLiquids(max = 256): number {
+    if (this.liquidActive.size === 0) return 0;
+    const W = this.widthTiles;
+    const batch: number[] = [];
+    for (const i of this.liquidActive) {
+      batch.push(i);
+      if (batch.length >= max) break;
+    }
+    for (const i of batch) this.liquidActive.delete(i);
+    this.liquidParity ^= 1;
+    let moved = 0;
+    const obsidian = this.tiles.idOf('obsidian');
+    for (const i of batch) {
+      const tx = i % W;
+      const ty = Math.floor(i / W);
+      const id = this.fgLoaded(tx, ty);
+      const liq = id > 0 ? (this.tiles.liquid[id] ?? 0) : 0;
+      if (!liq) continue;
+      const below = this.fgLoaded(tx, ty + 1);
+      if (below === 0) {
+        this.setTile(tx, ty, 'fg', 0);
+        this.setTile(tx, ty + 1, 'fg', id);
+        moved++;
+        continue;
+      }
+      const belowLiq = below > 0 ? (this.tiles.liquid[below] ?? 0) : 0;
+      if (belowLiq !== 0 && belowLiq !== liq) {
+        // Water and lava meet: the lava hardens.
+        if (liq === 2) this.setTile(tx, ty, 'fg', obsidian);
+        else this.setTile(tx, ty + 1, 'fg', obsidian);
+        moved++;
+        continue;
+      }
+      const dirs = (tx + ty + this.liquidParity) & 1 ? [1, -1] : [-1, 1];
+      for (const d of dirs) {
+        const side = this.fgLoaded(tx + d, ty);
+        const sideLiq = side > 0 ? (this.tiles.liquid[side] ?? 0) : 0;
+        if (sideLiq !== 0 && sideLiq !== liq) {
+          if (liq === 2) this.setTile(tx, ty, 'fg', obsidian);
+          else this.setTile(tx + d, ty, 'fg', obsidian);
+          moved++;
+          break;
+        }
+        if (side === 0 && this.fgLoaded(tx + d, ty + 1) === 0) {
+          this.setTile(tx, ty, 'fg', 0);
+          this.setTile(tx + d, ty + 1, 'fg', id);
+          moved++;
+          break;
+        }
+      }
+    }
+    return moved;
+  }
+
   /**
    * Change a tile. Callers must validate first (see sandbox/interaction.ts) — this is the raw
    * mutation that validated actions (and, in PHASE 6, the server) apply.
@@ -193,6 +290,7 @@ export class World implements TileReader {
     if (ly === CHUNK_SIZE - 1) touch(cx, cy + 1);
     const change: TileChange = { tx, ty, layer, previous, next: id };
     for (const l of this.listeners) l(change);
+    if (layer === 'fg') this.wakeLiquids(tx, ty);
     return true;
   }
 

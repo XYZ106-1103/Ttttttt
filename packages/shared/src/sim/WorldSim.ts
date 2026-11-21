@@ -5,7 +5,7 @@
  * authority. Same code, same rules.
  */
 import type { ActorEvent, CastFail } from '../combat/ActorCombat';
-import { type CombatEvent, CombatWorld } from '../combat/CombatWorld';
+import { type Combatant, type CombatEvent, CombatWorld } from '../combat/CombatWorld';
 import { expForKill } from '../combat/damage';
 import type { LearnFail } from '../combat/progression';
 import { CHUNK_SIZE, TILE_SIZE } from '../constants';
@@ -338,6 +338,19 @@ export class WorldSim {
     return save;
   }
 
+  /** Lava burns whatever is in it (twice a second), unless it is immune to burning. */
+  private burnInLava(
+    bodies: readonly (Combatant & { readonly motor: { readonly liquid: number } })[],
+    now: number,
+    dt: number,
+  ): void {
+    if (Math.floor(now * 2) === Math.floor((now - dt) * 2)) return;
+    for (const c of bodies) {
+      if (!c.alive || c.motor.liquid !== 2 || c.immune.has('burn')) continue;
+      this.combat.environmentDamage(c, Math.max(10, c.stats.maxHp * 0.08), now, 'burn');
+    }
+  }
+
   /** Chunks around each player count as explored (world map fog of war; kept in saves). */
   private markExplored(): void {
     const w = this.world;
@@ -433,6 +446,8 @@ export class WorldSim {
     this.processCombatEvents();
     for (const p of players) regenCharacter(p, now, dt);
     this.adventurers.regenActive(now, dt);
+    this.burnInLava([...players, ...active, ...this.monsters.monsters], now, dt);
+    if (this.tickCount % 4 === 0) this.world.stepLiquids(256);
     if (this.tickCount % 30 === 0) this.markExplored();
     for (const pk of this.dropSystem.step(
       dt,

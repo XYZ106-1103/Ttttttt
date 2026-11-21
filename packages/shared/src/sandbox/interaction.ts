@@ -130,7 +130,10 @@ function plan(
   const dy = ty * TILE_SIZE + TILE_SIZE / 2 - cy;
   if (Math.hypot(dx, dy) > reach * TILE_SIZE) return fail('out_of_reach', speed);
 
-  const fg = world.getFg(tx, ty);
+  const rawFg = world.getFg(tx, ty);
+  // Liquids are not blocks: blocks can be placed into them, and there is nothing to mine.
+  const liquid = (world.tiles.liquid[rawFg] ?? 0) !== 0;
+  const fg = liquid ? 0 : rawFg;
   const object = world.objectAt(tx, ty) ?? undefined;
   const objDef = object ? getObjectDef(object.key) : undefined;
 
@@ -139,6 +142,7 @@ function plan(
     const placeId = world.tiles.idOf(item.places);
     const placeDef = world.tiles.get(placeId);
     if (fg !== 0) return fail('occupied', speed);
+    if (liquid && placeDef?.collision !== 'solid') return fail('occupied', speed);
     if (object && !objDef?.replaceable) return fail('occupied', speed);
     const wall = world.getBg(tx, ty) !== 0;
     const solidSide = (x: number, y: number): boolean =>

@@ -3,7 +3,7 @@
  * into positioned effects, picks the music theme for where the player is and what is happening,
  * and keeps the ambience in step. Reads events only — presenters consume them afterwards.
  */
-import { type ActorEvent, GOLD_DROP, regionAt, TILE_SIZE, type UseOutcome } from '@world/shared';
+import { type ActorEvent, biomeAt, GOLD_DROP, TILE_SIZE, type UseOutcome } from '@world/shared';
 import type { FrameEvents } from '../entities/FrameEvents';
 import type { ClientSim } from '../sim/ClientSim';
 import type { AudioEngine, PlayOptions } from './AudioEngine';
@@ -240,9 +240,18 @@ export class GameAudio {
     let want: ThemeId;
     if (boss && Math.hypot(boss.motor.x - m.x, boss.motor.y - m.y) < BOSS_RANGE) want = 'boss';
     else if (depth > CAVE_DEPTH) want = 'cave';
-    else if (night) want = 'night';
-    else if (regionAt(tx, sim.world.generator.spawnTileX).id === 'starting_hill') want = 'town';
-    else want = 'day';
+    else {
+      const biome = biomeAt(tx, sim.world.generator.spawnTileX).id;
+      if (biome === 'volcano') want = 'volcano';
+      else if (
+        biome === 'tundra' ||
+        (biome === 'mountains' && Math.floor(m.y / TILE_SIZE) < sim.world.heightTiles * 0.3)
+      )
+        want = 'snow';
+      else if (night) want = 'night';
+      else if (biome === 'village') want = 'town';
+      else want = 'day';
+    }
     // Hold before switching so walking along a boundary does not flip the music back and forth.
     if (want !== this.candidate) {
       this.candidate = want;

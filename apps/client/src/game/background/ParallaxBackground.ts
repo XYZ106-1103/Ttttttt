@@ -41,6 +41,12 @@ function toRgb(c: number): number {
  * (art-pixel) screen coordinates. Time of day drives the sky gradient, celestial bodies, stars
  * and per-layer atmospheric tint.
  */
+/** Multiply an 0xRRGGBB color by per-channel factors. */
+function gradeRgb(c: number, g: readonly [number, number, number]): number {
+  const ch = (v: number, k: number) => Math.max(0, Math.min(255, Math.round(v * k)));
+  return (ch((c >> 16) & 255, g[0]) << 16) | (ch((c >> 8) & 255, g[1]) << 8) | ch(c & 255, g[2]);
+}
+
 export class ParallaxBackground {
   private readonly skyTex: Phaser.Textures.CanvasTexture;
   private readonly sky: Phaser.GameObjects.Image;
@@ -134,8 +140,17 @@ export class ParallaxBackground {
   }
 
   /** @param view World camera view (world pixels). */
-  update(view: ViewRect, hour: number, dt: number, timeSec: number): SkyState {
+  update(
+    view: ViewRect,
+    hour: number,
+    dt: number,
+    timeSec: number,
+    /** Biome color grade (linear multipliers). */
+    grade: readonly [number, number, number] = [1, 1, 1],
+  ): SkyState {
     const s = skyAt(hour);
+    const tinted = (c: number): number => gradeRgb(c, grade);
+    this.sky.setTint(tinted(0xffffff));
     this.state = s;
     if (Math.abs(hour - this.lastSkyHour) > 0.02) {
       this.redrawSky(s);
@@ -189,7 +204,7 @@ export class ParallaxBackground {
         Math.round(x),
         Math.round(horizon - H * 0.62 + c.y * H * 0.8 - rel * 0.03),
       );
-      c.image.setTint(cloudTint);
+      c.image.setTint(tinted(cloudTint));
       c.image.setVisible(x < W);
     }
 
@@ -199,7 +214,7 @@ export class ParallaxBackground {
       const top = Math.round(bottom - l.art.canvas.height);
       l.sprite.setPosition(0, top);
       l.sprite.tilePositionX = Math.round(view.left * l.art.scrollX);
-      l.sprite.setTint(tint);
+      l.sprite.setTint(tinted(tint));
       const fillTop = Math.max(0, top + l.art.canvas.height);
       l.fill.setPosition(0, fillTop);
       l.fill.setSize(W, Math.max(0, H - fillTop + 2));

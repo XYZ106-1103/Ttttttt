@@ -63,6 +63,8 @@ export interface MotorState extends Body {
   dropTimer: number;
   /** Seconds since last grounded. */
   airTime: number;
+  /** Liquid the body is in this tick (0 none, 1 water, 2 lava). */
+  liquid: number;
   readonly events: MotorEvents;
 }
 
@@ -82,6 +84,7 @@ export function createMotorState(x: number, y: number, config: MovementConfig): 
     jumping: false,
     dropTimer: 0,
     airTime: 0,
+    liquid: 0,
     events: {
       jumped: false,
       landed: false,
@@ -164,8 +167,20 @@ export function stepMotor(
     ev.droppedThrough = true;
   }
 
+  // --- Liquids ---------------------------------------------------------------------------------
+  const tx = Math.floor(s.x / TILE_SIZE);
+  const liquid = grid.liquidAt
+    ? grid.liquidAt(tx, Math.floor((s.y - s.height * 0.45) / TILE_SIZE))
+    : 0;
+  s.liquid = liquid;
+  const headDry =
+    liquid !== 0 && grid.liquidAt
+      ? grid.liquidAt(tx, Math.floor((s.y - s.height + 3) / TILE_SIZE)) === 0
+      : true;
+  const swimMul = liquid === 2 ? 0.4 : liquid === 1 ? 0.62 : 1;
+
   // --- Horizontal acceleration ----------------------------------------------------------------
-  const target = moveX * cfg.runSpeed * (input.speedMul ?? 1);
+  const target = moveX * cfg.runSpeed * (input.speedMul ?? 1) * swimMul;
   const opposing = moveX !== 0 && s.vx !== 0 && Math.sign(moveX) !== Math.sign(s.vx);
   let accel: number;
   if (s.grounded)
@@ -189,8 +204,20 @@ export function stepMotor(
     s.jumping = false;
   }
 
+  // --- Swimming: slow sinking, hold jump to rise, jump out at the surface -----------------------
+  if (liquid !== 0 && !s.grounded) {
+    if (input.jumpPressed && headDry) {
+      s.vy = -cfg.jumpVelocity * 0.8 * (input.jumpMul ?? 1);
+      ev.jumped = true;
+    } else if (input.jumpHeld) s.vy = Math.max(s.vy - 1100 * dt, liquid === 2 ? -90 : -150);
+    s.jumping = false;
+  }
+
   // --- Gravity --------------------------------------------------------------------------------
-  if (!s.grounded) {
+  if (liquid !== 0 && !s.grounded) {
+    s.vy = Math.min(s.vy + cfg.gravity * 0.22 * dt, input.down ? 160 : 75);
+    s.airTime = 0;
+  } else if (!s.grounded) {
     let g = cfg.gravity * (input.gravityMul ?? 1);
     if (s.vy > 0) g *= cfg.fallGravityMul;
     else if (Math.abs(s.vy) < cfg.apexThreshold && input.jumpHeld) g *= cfg.apexGravityMul;
